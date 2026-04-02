@@ -149,6 +149,10 @@ button:hover { background: var(--surface2); }
 [data-theme="dark"] .badge-asset { background: #14532d; color: #86efac; }
 [data-theme="dark"] .badge-liability { background: #7f1d1d; color: #fca5a5; }
 .acct-row select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 12px; }
+.acct-row.ignored { opacity: 0.45; }
+.ignore-btn { padding: 3px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.ignore-btn.active { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+[data-theme="dark"] .ignore-btn.active { background: #451a03; color: #fcd34d; border-color: #92400e; }
 
 /* ── Empty state ── */
 .empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
@@ -399,18 +403,26 @@ async function patchAccount(id, type) {
   });
   loadAll();
 }
+async function patchIgnore(id, ignored) {
+  await fetch('/api/accounts/' + id, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ignored})
+  });
+  loadAll();
+}
 function renderAccounts() {
   const el = document.getElementById('acct-list');
   if (!accounts.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No accounts yet. Import a file to get started.</div>'; return; }
   el.innerHTML = accounts.map(a => `
-    <div class="acct-row">
+    <div class="acct-row${a.ignored ? ' ignored' : ''}">
       <span class="acct-name">${a.name}</span>
-      <span class="badge badge-${a.account_type}">${a.account_type}</span>
-      ${a.override ? '<span style="font-size:10px;color:var(--text-muted)">overridden</span>' : ''}
-      <select onchange="patchAccount(${a.id}, this.value)">
+      ${!a.ignored ? `<span class="badge badge-${a.account_type}">${a.account_type}</span>` : ''}
+      ${a.override && !a.ignored ? '<span style="font-size:10px;color:var(--text-muted)">overridden</span>' : ''}
+      ${!a.ignored ? `<select onchange="patchAccount(${a.id}, this.value)">
         <option value="asset" ${a.account_type==='asset'?'selected':''}>asset</option>
         <option value="liability" ${a.account_type==='liability'?'selected':''}>liability</option>
-      </select>
+      </select>` : ''}
+      <button class="ignore-btn${a.ignored ? ' active' : ''}" onclick="patchIgnore(${a.id}, ${!a.ignored})">${a.ignored ? 'ignored' : 'ignore'}</button>
     </div>`).join('');
 }
 
@@ -480,13 +492,15 @@ function renderCards(s) {
 function deriveSeries() {
   const { periods, accounts: accts } = tsData;
   const n = periods.length;
-  const assets  = accts.filter(a => a.account_type === 'asset');
-  const liabs   = accts.filter(a => a.account_type === 'liability');
+  const assets  = accts.filter(a => a.account_type === 'asset' && !a.ignored);
+  const liabs   = accts.filter(a => a.account_type === 'liability' && !a.ignored);
+  const allAssets = accts.filter(a => a.account_type === 'asset');
+  const allLiabs  = accts.filter(a => a.account_type === 'liability');
   const totalAssets = periods.map((_, i) => assets.reduce((s, a) => s + (a.values[i] ?? 0), 0));
   const totalLiabs  = periods.map((_, i) => liabs.reduce((s, a) => s + (a.values[i] ?? 0), 0));
   const netWorth    = periods.map((_, i) => totalAssets[i] + totalLiabs[i]);
   const dta         = periods.map((_, i) => totalAssets[i] ? Math.abs(totalLiabs[i]) / totalAssets[i] * 100 : 0);
-  return { assets, liabs, totalAssets, totalLiabs, netWorth, dta, n };
+  return { assets, liabs, allAssets, allLiabs, totalAssets, totalLiabs, netWorth, dta, n };
 }
 
 // ── Net worth chart ───────────────────────────────────────────────────────────

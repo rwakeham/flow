@@ -25,7 +25,7 @@ services:
       FLOW_PASSWORD: ${FLOW_PASSWORD}
       SECRET_KEY: ${SECRET_KEY}
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     volumes:
       - ./frontend:/app/frontend:ro
 

@@ -122,6 +122,50 @@ else
   success "SECRET_KEY generated and saved"
 fi
 
+# ─── APP_PORT ────────────────────────────────────────────────────────────────
+header "Application port"
+
+EXISTING_PORT=$(_env_get APP_PORT)
+
+_port_free() {
+  ! (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | grep -qE ":$1\b"
+}
+
+_next_free_port() {
+  local p="${1:-8000}"
+  while ! _port_free "$p"; do
+    p=$((p + 1))
+  done
+  echo "$p"
+}
+
+if [ -n "$EXISTING_PORT" ]; then
+  if _port_free "$EXISTING_PORT"; then
+    success "APP_PORT=${EXISTING_PORT} is free — keeping it"
+  else
+    warn "Configured port ${EXISTING_PORT} is already in use"
+    SUGGESTED=$(_next_free_port "$EXISTING_PORT")
+    read -rp "  Enter a different port [${SUGGESTED}]: " NEW_PORT
+    APP_PORT="${NEW_PORT:-$SUGGESTED}"
+    _env_set APP_PORT "$APP_PORT"
+    success "APP_PORT set to ${APP_PORT}"
+  fi
+else
+  SUGGESTED=$(_next_free_port 8000)
+  if [ "$SUGGESTED" -eq 8000 ]; then
+    _env_set APP_PORT 8000
+    success "APP_PORT set to 8000"
+  else
+    warn "Port 8000 is already in use by another service"
+    read -rp "  Enter a port to use [${SUGGESTED}]: " NEW_PORT
+    APP_PORT="${NEW_PORT:-$SUGGESTED}"
+    _env_set APP_PORT "$APP_PORT"
+    success "APP_PORT set to ${APP_PORT}"
+  fi
+fi
+
+APP_PORT=$(_env_get APP_PORT)
+
 # ─── FLOW_PASSWORD ───────────────────────────────────────────────────────────
 header "Dashboard password"
 
@@ -240,13 +284,13 @@ _wait_for() {
 }
 
 _wait_for "PostgreSQL" "$COMPOSE exec -T db pg_isready -U flow" 30
-_wait_for "Flow app"   "curl -sf http://localhost:8000/api/health" 60
+_wait_for "Flow app"   "curl -sf http://localhost:${APP_PORT}/api/health" 60
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 echo
 echo -e "${_BOLD}${_GREEN}╔══════════════════════════════════════╗${_R}"
 echo -e "${_BOLD}${_GREEN}║   Flow is ready!                     ║${_R}"
-echo -e "${_BOLD}${_GREEN}║   Dashboard: http://localhost:8000   ║${_R}"
+echo -e "${_BOLD}${_GREEN}║   Dashboard: http://localhost:${APP_PORT}   ║${_R}"
 echo -e "${_BOLD}${_GREEN}╚══════════════════════════════════════╝${_R}"
 echo
 info "Logs:  docker compose logs -f app"

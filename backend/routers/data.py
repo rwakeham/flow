@@ -13,7 +13,8 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 # ── Accounts ─────────────────────────────────────────────────────────────────
 
 class AccountUpdate(BaseModel):
-    account_type: str
+    account_type: str | None = None
+    ignored: bool | None = None
 
 
 @router.get("/accounts")
@@ -25,6 +26,7 @@ def list_accounts(db: Session = Depends(get_db)):
             "name": a.name,
             "account_type": a.account_type,
             "override": a.override,
+            "ignored": a.ignored,
         }
         for a in accounts
     ]
@@ -32,15 +34,18 @@ def list_accounts(db: Session = Depends(get_db)):
 
 @router.patch("/accounts/{account_id}")
 def update_account(account_id: int, body: AccountUpdate, db: Session = Depends(get_db)):
-    if body.account_type not in ("asset", "liability"):
-        raise HTTPException(status_code=422, detail="account_type must be 'asset' or 'liability'")
     acct = db.get(Account, account_id)
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
-    acct.account_type = body.account_type
-    acct.override = True
+    if body.account_type is not None:
+        if body.account_type not in ("asset", "liability"):
+            raise HTTPException(status_code=422, detail="account_type must be 'asset' or 'liability'")
+        acct.account_type = body.account_type
+        acct.override = True
+    if body.ignored is not None:
+        acct.ignored = body.ignored
     db.commit()
-    return {"id": acct.id, "name": acct.name, "account_type": acct.account_type, "override": acct.override}
+    return {"id": acct.id, "name": acct.name, "account_type": acct.account_type, "override": acct.override, "ignored": acct.ignored}
 
 
 # ── Timeseries ────────────────────────────────────────────────────────────────
@@ -80,6 +85,7 @@ def get_timeseries(db: Session = Depends(get_db)):
             "id": acct.id,
             "name": acct.name,
             "account_type": acct.account_type,
+            "ignored": acct.ignored,
             "values": values,
         })
 
@@ -114,7 +120,7 @@ def get_summary(db: Session = Depends(get_db)):
                 SELECT a.account_type, SUM(b.amount)
                 FROM balances b
                 JOIN accounts a ON a.id = b.account_id
-                WHERE b.period = :period
+                WHERE b.period = :period AND a.ignored = false
                 GROUP BY a.account_type
             """),
             {"period": period},
@@ -137,13 +143,13 @@ def get_summary(db: Session = Depends(get_db)):
         prev_net = prev_assets + prev_liab
         mom_delta = round(curr_net - prev_net, 2)
 
-    # Largest asset account at current period
+    # Largest asset account at current period (excluding ignored)
     largest_row = db.execute(
         text("""
             SELECT a.name, b.amount
             FROM balances b
             JOIN accounts a ON a.id = b.account_id
-            WHERE b.period = :period AND a.account_type = 'asset'
+            WHERE b.period = :period AND a.account_type = 'asset' AND a.ignored = false
             ORDER BY b.amount DESC
             LIMIT 1
         """),

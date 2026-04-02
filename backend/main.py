@@ -5,6 +5,8 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from sqlalchemy import text
+
 from auth import clear_session_cookie, create_session_cookie, require_auth, verify_password
 from database import Base, engine
 from routers import data, upload
@@ -13,6 +15,11 @@ from routers import data, upload
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        conn.commit()
     yield
 
 

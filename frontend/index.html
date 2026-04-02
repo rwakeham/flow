@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>flow</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --surface2: #f7f8fa;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #378ADD;
+  --green: #22c55e;
+  --red: #ef4444;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: #1c1f26;
+  --surface2: #252830;
+  --text: #e8eaf0;
+  --text-muted: #9ca3af;
+  --border: #2e3240;
+  --accent: #5a9de0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+/* ── Login ── */
+#login-overlay {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+#login-overlay.hidden { display: none; }
+.login-box {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 40px; width: 340px; display: flex; flex-direction: column; gap: 16px;
+}
+.login-box h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+.login-box p { color: var(--text-muted); font-size: 13px; }
+.login-box input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 14px;
+}
+.login-box input:focus { outline: 2px solid var(--accent); }
+#login-error { color: var(--red); font-size: 13px; display: none; }
+
+/* ── Buttons ── */
+button {
+  cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); font-size: 13px; padding: 7px 14px;
+  transition: background 0.15s;
+}
+button:hover { background: var(--surface2); }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { opacity: 0.9; background: var(--accent); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ── Top bar ── */
+#topbar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 24px; height: 52px; gap: 12px;
+}
+#topbar h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
+#topbar .spacer { flex: 1; }
+
+/* ── Layout ── */
+#app { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+#app.hidden { display: none; }
+
+/* ── Metric cards ── */
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.card {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 4px;
+}
+.card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.card-value { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+.card-delta { font-size: 12px; font-weight: 500; }
+.delta-up { color: var(--green); }
+.delta-down { color: var(--red); }
+.delta-neutral { color: var(--text-muted); }
+
+/* ── Tabs ── */
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.tab-btn {
+  padding: 8px 16px; font-size: 13px; border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; background: transparent; color: var(--text-muted);
+}
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-btn:hover { background: transparent; color: var(--text); }
+
+/* ── Chart panels ── */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.chart-card {
+  background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius);
+  padding: 16px;
+}
+.chart-card.full { grid-column: 1 / -1; }
+.chart-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.chart-wrap { position: relative; width: 100%; }
+.stat-big { font-size: 28px; font-weight: 700; letter-spacing: -1px; margin-bottom: 4px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Toggle ── */
+.toggle-group { display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.toggle-btn { border: none; border-radius: 0; padding: 4px 10px; font-size: 11px; color: var(--text-muted); }
+.toggle-btn.active { background: var(--surface2); color: var(--text); font-weight: 600; }
+
+/* ── Upload modal ── */
+#upload-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex;
+  align-items: center; justify-content: center; z-index: 500;
+}
+#upload-modal.hidden { display: none; }
+.modal-box {
+  background: var(--surface); border-radius: var(--radius); padding: 28px;
+  width: 420px; display: flex; flex-direction: column; gap: 14px;
+}
+.modal-box h2 { font-size: 16px; font-weight: 700; }
+.modal-box p { font-size: 12px; color: var(--text-muted); }
+.modal-box input[type=file] { font-size: 13px; color: var(--text); }
+#upload-result { font-size: 13px; padding: 10px; background: var(--surface2); border-radius: var(--radius-sm); display: none; }
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── Account manager ── */
+#acct-panel { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); margin-top: 16px; }
+#acct-toggle { width: 100%; text-align: left; padding: 12px 16px; font-weight: 600; font-size: 13px; border: none; border-radius: var(--radius); background: transparent; }
+#acct-body { display: none; padding: 0 16px 16px; }
+#acct-body.open { display: block; }
+.acct-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.acct-row:last-child { border-bottom: none; }
+.acct-name { flex: 1; }
+.badge { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 600; letter-spacing: 0.04em; }
+.badge-asset { background: #dcfce7; color: #15803d; }
+.badge-liability { background: #fee2e2; color: #b91c1c; }
+[data-theme="dark"] .badge-asset { background: #14532d; color: #86efac; }
+[data-theme="dark"] .badge-liability { background: #7f1d1d; color: #fca5a5; }
+.acct-row select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 12px; }
+
+/* ── Empty state ── */
+.empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+.empty h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-overlay">
+  <div class="login-box">
+    <h1>flow</h1>
+    <p>Personal finance dashboard</p>
+    <input type="password" id="login-pw" placeholder="Password" autocomplete="current-password">
+    <div id="login-error">Incorrect password</div>
+    <button class="btn-primary" onclick="doLogin()">Sign in</button>
+  </div>
+</div>
+
+<!-- Upload modal -->
+<div id="upload-modal" class="hidden">
+  <div class="modal-box">
+    <h2>Import data</h2>
+    <p>Upload a CSV or XLSX file. Columns: <strong>date</strong> + one column per account.<br>Existing rows for the same month will be overwritten.</p>
+    <input type="file" id="upload-file" accept=".csv,.xlsx">
+    <div id="upload-result"></div>
+    <div class="modal-footer">
+      <button onclick="closeUpload()">Cancel</button>
+      <button class="btn-primary" onclick="doUpload()">Upload</button>
+    </div>
+  </div>
+</div>
+
+<!-- Top bar -->
+<div id="topbar">
+  <h1>flow</h1>
+  <button onclick="openUpload()">↑ Import</button>
+  <button id="theme-btn" onclick="toggleTheme()">◑</button>
+  <button onclick="doLogout()">Sign out</button>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <!-- Metric cards -->
+  <div class="cards">
+    <div class="card">
+      <div class="card-label">Net Worth</div>
+      <div class="card-value" id="c-nw">—</div>
+      <div class="card-delta" id="c-nw-d"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Assets</div>
+      <div class="card-value" id="c-assets">—</div>
+      <div class="card-delta" id="c-assets-d"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Liabilities</div>
+      <div class="card-value" id="c-liab">—</div>
+      <div class="card-delta" id="c-liab-d"></div>
+    </div>
+    <div class="card">
+      <div class="card-label" id="c-top-label">Largest Asset</div>
+      <div class="card-value" id="c-top">—</div>
+      <div class="card-delta" id="c-top-d"></div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
+    <button class="tab-btn" onclick="switchTab('assets',this)">Assets</button>
+    <button class="tab-btn" onclick="switchTab('liabilities',this)">Liabilities</button>
+  </div>
+
+  <!-- Overview -->
+  <div id="tab-overview" class="tab-panel active">
+    <div class="chart-card full" style="margin-bottom:16px">
+      <div class="chart-title">
+        Net Worth Over Time
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="nw-dollar" onclick="setNwMode('$',this)">$</button>
+          <button class="toggle-btn" id="nw-pct" onclick="setNwMode('%',this)">%</button>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:260px"><canvas id="chart-nw"></canvas></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-title">Asset Allocation</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chart-alloc"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Debt-to-Asset Ratio</div>
+        <div class="stat-big" id="dta-stat">—</div>
+        <div class="card-delta" id="dta-delta" style="margin-bottom:8px"></div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chart-dta"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card full">
+      <div class="chart-title">Month-over-Month Change</div>
+      <div class="chart-wrap" style="height:300px"><canvas id="chart-mom"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Assets -->
+  <div id="tab-assets" class="tab-panel">
+    <div class="chart-card">
+      <div class="chart-title">Asset Accounts Over Time</div>
+      <div class="chart-legend" id="legend-assets"></div>
+      <div class="chart-wrap" style="height:340px"><canvas id="chart-assets"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Liabilities -->
+  <div id="tab-liabilities" class="tab-panel">
+    <div class="chart-card">
+      <div class="chart-title">Liabilities Over Time</div>
+      <div class="chart-legend" id="legend-liab"></div>
+      <div class="chart-wrap" style="height:340px"><canvas id="chart-liab"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Account manager -->
+  <div id="acct-panel">
+    <button id="acct-toggle" onclick="toggleAcctPanel()">▸ Manage Accounts</button>
+    <div id="acct-body">
+      <div id="acct-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ASSET_COLORS  = ['#378ADD','#5DCAA5','#D85A30','#7F77DD','#BA7517','#D4537E','#63A02A'];
+const LIAB_COLORS   = ['#E24B4A','#F09595'];
+const GRID          = 'rgba(128,128,128,0.12)';
+const TICK          = '#888';
+
+let tsData = null;   // timeseries API response
+let accounts = [];   // accounts list
+let charts = {};     // chart instances keyed by id
+let nwMode = '$';
+
+// ── Formatting ────────────────────────────────────────────────────────────────
+function fmt(v) {
+  if (v === null || v === undefined) return '—';
+  const sign = v < 0 ? '-' : '';
+  const a = Math.abs(v);
+  if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return sign + '$' + Math.round(a / 1000) + 'K';
+  return sign + '$' + Math.round(a);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined) return '—';
+  const sign = v >= 0 ? '+' : '';
+  return sign + v.toFixed(1) + '%';
+}
+function deltaClass(v, invertGood) {
+  if (v === null || v === undefined || v === 0) return 'delta-neutral';
+  const good = invertGood ? v < 0 : v > 0;
+  return good ? 'delta-up' : 'delta-down';
+}
+function deltaArrow(v, invertGood) {
+  if (v === null || v === undefined || v === 0) return '';
+  const good = invertGood ? v < 0 : v > 0;
+  return (v > 0 ? '▲ ' : '▼ ') + fmt(Math.abs(v));
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const pw = document.getElementById('login-pw').value;
+  const res = await fetch('/api/auth/login', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({password: pw})
+  });
+  if (res.ok) {
+    document.getElementById('login-overlay').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    loadAll();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+async function doLogout() {
+  await fetch('/api/auth/logout', {method:'POST'});
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('login-pw').value = '';
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem('flow-theme', t);
+}
+(function() {
+  const t = localStorage.getItem('flow-theme');
+  if (t) document.documentElement.dataset.theme = t;
+})();
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+function openUpload() { document.getElementById('upload-modal').classList.remove('hidden'); }
+function closeUpload() {
+  document.getElementById('upload-modal').classList.add('hidden');
+  document.getElementById('upload-result').style.display = 'none';
+  document.getElementById('upload-file').value = '';
+}
+async function doUpload() {
+  const f = document.getElementById('upload-file').files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  const res = await fetch('/api/upload', {method:'POST', body: fd});
+  const r = document.getElementById('upload-result');
+  r.style.display = 'block';
+  if (res.ok) {
+    const d = await res.json();
+    r.style.color = 'var(--green)';
+    r.textContent = `✓ ${d.rows_written} rows written across ${d.periods_upserted} periods, ${d.accounts_seen} accounts (${d.accounts_created} new).`;
+    loadAll();
+  } else {
+    const d = await res.json().catch(() => ({detail: 'Upload failed'}));
+    r.style.color = 'var(--red)';
+    r.textContent = '✗ ' + (d.detail || 'Upload failed');
+  }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Account panel ─────────────────────────────────────────────────────────────
+function toggleAcctPanel() {
+  const b = document.getElementById('acct-body');
+  const t = document.getElementById('acct-toggle');
+  b.classList.toggle('open');
+  t.textContent = b.classList.contains('open') ? '▾ Manage Accounts' : '▸ Manage Accounts';
+}
+async function patchAccount(id, type) {
+  await fetch('/api/accounts/' + id, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({account_type: type})
+  });
+  loadAll();
+}
+function renderAccounts() {
+  const el = document.getElementById('acct-list');
+  if (!accounts.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No accounts yet. Import a file to get started.</div>'; return; }
+  el.innerHTML = accounts.map(a => `
+    <div class="acct-row">
+      <span class="acct-name">${a.name}</span>
+      <span class="badge badge-${a.account_type}">${a.account_type}</span>
+      ${a.override ? '<span style="font-size:10px;color:var(--text-muted)">overridden</span>' : ''}
+      <select onchange="patchAccount(${a.id}, this.value)">
+        <option value="asset" ${a.account_type==='asset'?'selected':''}>asset</option>
+        <option value="liability" ${a.account_type==='liability'?'selected':''}>liability</option>
+      </select>
+    </div>`).join('');
+}
+
+// ── Chart helpers ─────────────────────────────────────────────────────────────
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+function baseOpts(yFmt) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: {
+      callbacks: { label: ctx => ' ' + (yFmt ? yFmt(ctx.parsed.y) : fmt(ctx.parsed.y)) }
+    }},
+    scales: {
+      x: { grid: { color: GRID }, ticks: { color: TICK, maxRotation: 0 } },
+      y: { grid: { color: GRID }, ticks: { color: TICK, callback: v => yFmt ? yFmt(v) : fmt(v) } }
+    }
+  };
+}
+
+// ── Load everything ───────────────────────────────────────────────────────────
+async function loadAll() {
+  const [sumRes, tsRes, acctRes] = await Promise.all([
+    fetch('/api/data/summary'),
+    fetch('/api/data/timeseries'),
+    fetch('/api/accounts'),
+  ]);
+  if (sumRes.status === 401 || tsRes.status === 401) {
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-overlay').classList.remove('hidden');
+    return;
+  }
+  const sum  = await sumRes.json();
+  tsData     = await tsRes.json();
+  accounts   = await acctRes.json();
+
+  renderCards(sum);
+  renderAccounts();
+  if (tsData.periods.length > 0) renderAllCharts();
+}
+
+// ── Metric cards ──────────────────────────────────────────────────────────────
+function setCard(valId, deltaId, value, delta, invertGood) {
+  document.getElementById(valId).textContent = fmt(value);
+  const d = document.getElementById(deltaId);
+  if (delta !== null && delta !== undefined) {
+    d.textContent = deltaArrow(delta, invertGood);
+    d.className = 'card-delta ' + deltaClass(delta, invertGood);
+  } else {
+    d.textContent = '';
+  }
+}
+function renderCards(s) {
+  setCard('c-nw', 'c-nw-d', s.net_worth, s.net_worth_mom_delta, false);
+  setCard('c-assets', 'c-assets-d', s.total_assets, null, false);
+  setCard('c-liab', 'c-liab-d', Math.abs(s.total_liabilities), null, false);
+  if (s.largest_asset) {
+    document.getElementById('c-top-label').textContent = s.largest_asset.name;
+    setCard('c-top', 'c-top-d', s.largest_asset.value, s.largest_asset.mom_delta, false);
+  }
+  // Liability delta label
+  const liabDelta = document.getElementById('c-liab-d');
+  if (s.net_worth_mom_delta !== null) {
+    const prevLiab = s.total_liabilities; // directional hint not available in summary; skip
+  }
+}
+
+// ── Derived series ────────────────────────────────────────────────────────────
+function deriveSeries() {
+  const { periods, accounts: accts } = tsData;
+  const n = periods.length;
+  const assets  = accts.filter(a => a.account_type === 'asset');
+  const liabs   = accts.filter(a => a.account_type === 'liability');
+  const totalAssets = periods.map((_, i) => assets.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+  const totalLiabs  = periods.map((_, i) => liabs.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+  const netWorth    = periods.map((_, i) => totalAssets[i] + totalLiabs[i]);
+  const dta         = periods.map((_, i) => totalAssets[i] ? Math.abs(totalLiabs[i]) / totalAssets[i] * 100 : 0);
+  return { assets, liabs, totalAssets, totalLiabs, netWorth, dta, n };
+}
+
+// ── Net worth chart ───────────────────────────────────────────────────────────
+function setNwMode(mode, btn) {
+  nwMode = mode;
+  document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderNwChart();
+}
+function renderNwChart() {
+  const { periods, netWorth, totalAssets, totalLiabs } = (() => {
+    const d = deriveSeries();
+    return { periods: tsData.periods, netWorth: d.netWorth, totalAssets: d.totalAssets, totalLiabs: d.totalLiabs };
+  })();
+  destroyChart('chart-nw');
+  let nwVals = netWorth, assetVals = totalAssets, liabVals = totalLiabs.map(v => Math.abs(v));
+  let yFmt = fmt;
+  if (nwMode === '%') {
+    const base = nw => v => base => v === null ? null : ((v - base) / Math.abs(base || 1)) * 100;
+    const idx = (arr) => { const b = arr.find(v => v !== null && v !== 0) ?? 1; return arr.map(v => ((v - b) / Math.abs(b)) * 100); };
+    nwVals = idx(netWorth); assetVals = idx(totalAssets); liabVals = idx(totalLiabs.map(Math.abs));
+    yFmt = v => fmtPct(v);
+  }
+  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const opts = baseOpts(yFmt);
+  opts.scales.x.ticks.maxRotation = 40;
+  charts['chart-nw'] = new Chart(document.getElementById('chart-nw'), {
+    type: 'line', data: { labels,
+      datasets: [
+        { label: 'Net Worth', data: nwVals, borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,0.08)', fill: true, tension: 0.3, pointRadius: 3 },
+        { label: 'Total Assets', data: assetVals, borderColor: '#5DCAA5', borderDash: [5,3], fill: false, tension: 0.3, pointRadius: 2 },
+        { label: 'Liabilities', data: liabVals, borderColor: '#E24B4A', borderDash: [5,3], fill: false, tension: 0.3, pointRadius: 2 },
+      ]
+    }, options: opts
+  });
+}
+
+// ── Allocation doughnut ───────────────────────────────────────────────────────
+function renderAllocChart() {
+  const { assets } = deriveSeries();
+  const n = tsData.periods.length - 1;
+  const labels = assets.map(a => a.name);
+  const values = assets.map(a => Math.max(0, a.values[n] ?? 0));
+  destroyChart('chart-alloc');
+  charts['chart-alloc'] = new Chart(document.getElementById('chart-alloc'), {
+    type: 'doughnut', data: { labels, datasets: [{ data: values, backgroundColor: ASSET_COLORS, borderWidth: 1 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmt(ctx.parsed) } } },
+      cutout: '60%'
+    }
+  });
+}
+
+// ── Debt-to-asset chart ───────────────────────────────────────────────────────
+function renderDtaChart() {
+  const { dta } = deriveSeries();
+  const n = dta.length;
+  const curr = dta[n-1], prev = dta[n-2];
+  const delta = (prev !== undefined) ? curr - prev : null;
+  document.getElementById('dta-stat').textContent = curr.toFixed(1) + '%';
+  const dd = document.getElementById('dta-delta');
+  if (delta !== null) {
+    dd.textContent = (delta >= 0 ? '▲ ' : '▼ ') + Math.abs(delta).toFixed(1) + 'pp MoM';
+    dd.className = 'card-delta ' + (delta > 0 ? 'delta-down' : 'delta-up');
+  }
+  const pointColors = dta.map((v, i) => i === 0 ? TICK : (v <= dta[i-1] ? '#22c55e' : '#ef4444'));
+  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const mn = Math.min(...dta), mx = Math.max(...dta);
+  destroyChart('chart-dta');
+  charts['chart-dta'] = new Chart(document.getElementById('chart-dta'), {
+    type: 'line', data: { labels, datasets: [{
+      data: dta, borderColor: '#9ca3af', tension: 0.3, pointRadius: 4,
+      pointBackgroundColor: pointColors, fill: false
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.y.toFixed(1) + '%' } } },
+      scales: {
+        x: { grid: { color: GRID }, ticks: { color: TICK, maxRotation: 40 } },
+        y: { grid: { color: GRID }, ticks: { color: TICK, callback: v => v.toFixed(0) + '%' }, min: Math.max(0, mn - 0.5), max: mx + 0.5 }
+      }
+    }
+  });
+}
+
+// ── MoM change bar chart ──────────────────────────────────────────────────────
+function renderMomChart() {
+  const { assets, liabs } = deriveSeries();
+  const n = tsData.periods.length;
+  if (n < 2) return;
+  const allAccts = [...assets, ...liabs];
+  const labels = allAccts.map(a => a.name);
+  const values = allAccts.map(a => {
+    const curr = a.values[n-1] ?? 0;
+    const prev = a.values[n-2] ?? 0;
+    return a.account_type === 'liability' ? -(curr - prev) : (curr - prev);
+  });
+  const colors = values.map((v, i) => v >= 0 ? '#22c55e' : '#ef4444');
+  destroyChart('chart-mom');
+  charts['chart-mom'] = new Chart(document.getElementById('chart-mom'), {
+    type: 'bar', data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.parsed.y) } } },
+      scales: {
+        x: { grid: { color: GRID }, ticks: { color: TICK, maxRotation: 40, autoSkip: false } },
+        y: { grid: { color: GRID }, ticks: { color: TICK, callback: fmt } }
+      }
+    }
+  });
+}
+
+// ── Assets tab chart ──────────────────────────────────────────────────────────
+function renderAssetsChart() {
+  const { assets } = deriveSeries();
+  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const legend = document.getElementById('legend-assets');
+  legend.innerHTML = assets.map((a, i) =>
+    `<div class="legend-item"><div class="legend-dot" style="background:${ASSET_COLORS[i % ASSET_COLORS.length]}"></div>${a.name}</div>`
+  ).join('');
+  destroyChart('chart-assets');
+  charts['chart-assets'] = new Chart(document.getElementById('chart-assets'), {
+    type: 'line', data: { labels, datasets: assets.map((a, i) => ({
+      label: a.name, data: a.values, borderColor: ASSET_COLORS[i % ASSET_COLORS.length],
+      backgroundColor: 'transparent', tension: 0.3, pointRadius: 3, spanGaps: true
+    }))},
+    options: { ...baseOpts(fmt), plugins: { legend: { display: false } } }
+  });
+}
+
+// ── Liabilities tab chart ─────────────────────────────────────────────────────
+function renderLiabChart() {
+  const { liabs } = deriveSeries();
+  if (!liabs.length) {
+    document.getElementById('legend-liab').innerHTML = '';
+    destroyChart('chart-liab');
+    return;
+  }
+  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  document.getElementById('legend-liab').innerHTML = liabs.map((a, i) =>
+    `<div class="legend-item"><div class="legend-dot" style="background:${LIAB_COLORS[i % LIAB_COLORS.length]}"></div>${a.name}</div>`
+  ).join('');
+  destroyChart('chart-liab');
+  charts['chart-liab'] = new Chart(document.getElementById('chart-liab'), {
+    type: 'line', data: { labels, datasets: liabs.map((a, i) => ({
+      label: a.name, data: a.values.map(v => v !== null ? Math.abs(v) : null),
+      borderColor: LIAB_COLORS[i % LIAB_COLORS.length], backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 3, spanGaps: true
+    }))},
+    options: {
+      ...baseOpts(fmt),
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: ctx => ' -' + fmt(Math.abs(ctx.parsed.y))
+      }}}
+    }
+  });
+}
+
+function renderAllCharts() {
+  renderNwChart();
+  renderAllocChart();
+  renderDtaChart();
+  renderMomChart();
+  renderAssetsChart();
+  renderLiabChart();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  const res = await fetch('/api/data/summary');
+  if (res.status === 401) return; // login overlay stays visible
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  loadAll();
+})();
+</script>
+</body>
+</html>

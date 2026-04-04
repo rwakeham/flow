@@ -1270,11 +1270,36 @@ function renderBankSubRow(t) {
   </tr>`;
 }
 
+function _rankManualForBank(bankTxn, manualList) {
+  // Sort manual options by relevance to this bank transaction:
+  // exact date+amount first, then by date proximity, then by amount proximity.
+  const bDate = new Date(bankTxn.date).getTime();
+  return [...(manualList || [])].sort((a, b) => {
+    const aDays = Math.abs(new Date(a.date).getTime() - bDate) / 86400000;
+    const bDays = Math.abs(new Date(b.date).getTime() - bDate) / 86400000;
+    const aAmt  = Math.abs(a.amount - bankTxn.amount);
+    const bAmt  = Math.abs(b.amount - bankTxn.amount);
+    const aExact = aDays === 0 && aAmt === 0;
+    const bExact = bDays === 0 && bAmt === 0;
+    if (aExact !== bExact) return aExact ? -1 : 1;
+    // Sort by combined date+amount proximity
+    return (aDays + aAmt) - (bDays + bAmt);
+  });
+}
+
 function renderBankUnmatchedRow(t, unmatchedManual) {
   const credit = t.amount > 0 ? fmtFull(t.amount) : '';
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
-  const opts = (unmatchedManual || [])
-    .map(m => `<option value="${m.id}">${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</option>`)
+  const ranked = _rankManualForBank(t, unmatchedManual);
+  const exactMatch = ranked[0] && ranked[0].date === t.date && Math.abs(ranked[0].amount - t.amount) < 0.001
+    ? ranked[0] : null;
+  const opts = ranked
+    .map(m => {
+      const isExact = m.date === t.date && Math.abs(m.amount - t.amount) < 0.001;
+      const label = `${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})${isExact ? ' ★' : ''}`;
+      const sel = isExact ? ' selected' : '';
+      return `<option value="${m.id}"${sel}>${label}</option>`;
+    })
     .join('');
   const safeDesc = JSON.stringify(t.bank_description || t.description).replace(/"/g, '&quot;');
   return `<tr class="row-bank-unmatched" data-id="${t.id}">
@@ -1283,7 +1308,7 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
       <span class="bank-desc">${escHtml(t.bank_description || t.description)}</span>
       <div class="row-actions" style="margin-top:4px">
         <select class="match-select" id="match-sel-${t.id}">
-          <option value="">Find Match…</option>${opts}
+          <option value="">${exactMatch ? '★ Exact match pre-selected ↓' : 'Find Match…'}</option>${opts}
         </select>
         <button class="btn-sm btn-primary" onclick="doManualMatch(${t.id})">Match</button>
         <button class="btn-sm" onclick="openAtl(${t.id}, ${safeDesc})">+ Add to Ledger</button>
@@ -1498,10 +1523,6 @@ async function renderReconcile() {
   if (!data.unmatched_bank.length) {
     bankEl.innerHTML = '<div class="rec-row" style="color:var(--text-muted);font-size:12px">All bank transactions matched.</div>';
   } else {
-    const manualOptions = data.unmatched_manual.map(m =>
-      `<option value="${m.id}">${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</option>`
-    ).join('');
-
     bankEl.innerHTML = data.unmatched_bank.map(t => {
       const sug = t.suggestion;
       const sugHtml = sug ? `
@@ -1511,6 +1532,16 @@ async function renderReconcile() {
           (score ${(sug.score * 100).toFixed(0)}%)
           <button class="btn-sm btn-primary" onclick="doRecMatch(${t.id}, ${sug.manual_id})">✓ Match</button>
         </div>` : '';
+      // Rank manual options by relevance to this bank transaction
+      const ranked = _rankManualForBank(t, data.unmatched_manual);
+      const exactMatch = ranked[0] && ranked[0].date === t.date && Math.abs(ranked[0].amount - t.amount) < 0.001
+        ? ranked[0] : null;
+      const manualOptions = ranked.map(m => {
+        const isExact = m.date === t.date && Math.abs(m.amount - t.amount) < 0.001;
+        const label = `${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})${isExact ? ' ★' : ''}`;
+        const sel = isExact ? ' selected' : '';
+        return `<option value="${m.id}"${sel}>${label}</option>`;
+      }).join('');
       return `
         <div class="rec-row" data-id="${t.id}">
           <div class="rec-row-top">
@@ -1521,7 +1552,7 @@ async function renderReconcile() {
           ${sugHtml}
           <div class="rec-actions">
             <select class="match-select" id="rec-sel-${t.id}">
-              <option value="">Find Match…</option>
+              <option value="">${exactMatch ? '★ Exact match pre-selected ↓' : 'Find Match…'}</option>
               ${manualOptions}
             </select>
             <button class="btn-sm" onclick="doRecMatchSel(${t.id})">Match</button>

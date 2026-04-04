@@ -44,29 +44,33 @@ def _txn_dict(t: Transaction, balance: float | None = None) -> dict:
     return d
 
 
-def _compute_running_balance(opening: float, txns: list[Transaction]) -> list[dict]:
+def _compute_running_balance(opening: float, txns: list[Transaction]) -> dict:
     """
-    Returns transactions with running balance computed. Only manual (and matched-pair
-    primary) transactions contribute to the visible running balance.
-    The balance is computed in chronological order; bank-only rows are included in the
-    list but inherit the balance from the previous manual row.
+    Computes running balances for all transactions in chronological order.
+    Returns:
+      transactions    — list in ascending date order, each manual row has 'balance' (forecast)
+      forecast_balance — total including all manual transactions
+      verified_balance — total including only reconciled manual transactions
     """
-    # Sort: date ASC, then created_at ASC for stable ordering within a day
     sorted_txns = sorted(txns, key=lambda t: (t.date, t.created_at or t.id))
 
-    balance = opening
+    forecast_bal = opening
+    verified_bal = opening
     result = []
     for t in sorted_txns:
-        # Manual transactions and matched manual primaries advance the balance.
-        # Bank-only (unmatched bank) rows are listed but don't show a running balance
-        # (they are sub-rows in the UI).
         if t.source == "manual":
-            balance += float(t.amount)
-            result.append(_txn_dict(t, balance))
+            forecast_bal += float(t.amount)
+            if t.is_reconciled:
+                verified_bal += float(t.amount)
+            result.append(_txn_dict(t, forecast_bal))
         else:
-            # bank row — no running balance contribution shown
             result.append(_txn_dict(t))
-    return result
+
+    return {
+        "transactions": result,
+        "forecast_balance": round(forecast_bal, 2),
+        "verified_balance": round(verified_bal, 2),
+    }
 
 
 # ── Register Accounts ─────────────────────────────────────────────────────────
@@ -143,11 +147,7 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    txns = (
-        db.query(Transaction)
-        .filter(Transaction.register_account_id == account_id)
-        .all()
-    )
+    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
     return _compute_running_balance(float(acct.opening_balance), txns)
 
 

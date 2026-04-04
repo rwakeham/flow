@@ -218,6 +218,24 @@ button:hover { background: var(--surface2); }
 .rec-suggestion strong { color: var(--text); }
 .rec-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
 .match-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 11px; max-width: 200px; }
+
+/* ── Register filter bar ── */
+.reg-filter-bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.reg-filter-bar input[type=text] { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; min-width: 180px; flex: 1; }
+.reg-filter-bar select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
+.reg-filter-bar .filter-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+/* ── Sortable headers ── */
+.register-table th.sortable { cursor: pointer; user-select: none; }
+.register-table th.sortable:hover { color: var(--text); }
+.sort-asc::after { content: ' ▲'; font-size: 9px; }
+.sort-desc::after { content: ' ▼'; font-size: 9px; }
+/* ── Balance variants ── */
+.balance-forecast { color: var(--text-muted); font-style: italic; }
+.balance-forecast::before { content: '~'; font-size: 10px; }
+/* ── Pagination ── */
+.reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
+.reg-pagination button { padding: 3px 10px; font-size: 12px; }
+.reg-pagination .page-info { flex: 1; text-align: center; }
 </style>
 </head>
 <body>
@@ -272,12 +290,8 @@ button:hover { background: var(--surface2); }
     <input type="date" id="txn-date" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
     <label style="font-size:12px;color:var(--text-muted)">Description</label>
     <input type="text" id="txn-desc" placeholder="Description" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
-    <label style="font-size:12px;color:var(--text-muted)">Amount</label>
-    <div style="display:flex;gap:8px;margin-top:4px;margin-bottom:8px;align-items:center">
-      <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="txn-dir" value="debit" checked> Debit (−)</label>
-      <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="txn-dir" value="credit"> Credit (+)</label>
-      <input type="number" id="txn-amount" placeholder="0.00" step="0.01" min="0" style="flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px">
-    </div>
+    <label style="font-size:12px;color:var(--text-muted)">Amount <span style="font-weight:400">(negative = debit/out, positive = credit/in)</span></label>
+    <input type="text" id="txn-amount" placeholder="-1234.56 or 1234.56" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
     <label style="font-size:12px;color:var(--text-muted)">Notes (optional)</label>
     <input type="text" id="txn-notes" placeholder="" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
     <div id="add-txn-error" style="color:var(--red);font-size:12px;display:none;margin-top:6px"></div>
@@ -439,22 +453,37 @@ button:hover { background: var(--surface2); }
   <!-- Normal register view -->
   <div id="register-view">
     <div class="register-wrap">
+      <div class="reg-filter-bar" id="reg-filter-bar" style="display:none">
+        <input type="text" id="reg-search" placeholder="Search description…" oninput="cfApplyFilter()">
+        <select id="reg-rec-filter" onchange="cfApplyFilter()">
+          <option value="all">All</option>
+          <option value="reconciled">Reconciled</option>
+          <option value="unreconciled">Unreconciled</option>
+        </select>
+        <button class="btn-sm" onclick="cfClearFilter()" id="reg-clear-filter" style="display:none">✕ Clear</button>
+        <span class="filter-count" id="reg-filter-count"></span>
+      </div>
       <table class="register-table">
         <thead>
-          <tr>
-            <th style="width:90px">Date</th>
-            <th>Description</th>
-            <th class="num" style="width:110px">Credit</th>
-            <th class="num" style="width:110px">Debit</th>
-            <th class="num" style="width:110px">Balance</th>
-            <th style="width:36px">✓</th>
+          <tr id="reg-thead-row">
+            <th class="sortable" style="width:100px" data-col="date" onclick="cfSetSort('date')">Date</th>
+            <th class="sortable" data-col="description" onclick="cfSetSort('description')">Description</th>
+            <th class="sortable num" style="width:120px" data-col="credit" onclick="cfSetSort('credit')">Credit</th>
+            <th class="sortable num" style="width:120px" data-col="debit" onclick="cfSetSort('debit')">Debit</th>
+            <th class="sortable num" style="width:120px" data-col="balance" onclick="cfSetSort('balance')">Balance</th>
+            <th class="sortable" style="width:40px" data-col="reconciled" onclick="cfSetSort('reconciled')">✓</th>
             <th style="width:80px"></th>
           </tr>
         </thead>
         <tbody id="register-tbody">
-          <tr><td colspan="7" class="empty" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>
+          <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>
         </tbody>
       </table>
+      <div class="reg-pagination" id="reg-pagination" style="display:none">
+        <button id="reg-prev" onclick="cfChangePage(-1)">‹ Prev</button>
+        <span class="page-info" id="reg-page-info"></span>
+        <button id="reg-next" onclick="cfChangePage(1)">Next ›</button>
+      </div>
     </div>
   </div>
 
@@ -540,7 +569,7 @@ async function doLogout() {
   // Reset section nav
   document.getElementById('nav-dashboard').classList.add('active');
   document.getElementById('nav-cashflow').classList.remove('active');
-  cfCurrentId = null; cfTxns = []; cfAccounts = []; cfReconciling = false;
+  cfCurrentId = null; cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0}; cfAccounts = []; cfReconciling = false; cfPage = 1;
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -902,10 +931,18 @@ function renderAllCharts() {
 // CASH FLOW / REGISTER
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let cfAccounts = [];       // list of register accounts
-let cfCurrentId = null;   // selected register_account id
-let cfTxns = [];           // current transaction list (from API)
+let cfAccounts   = [];        // register account list
+let cfCurrentId  = null;      // selected register_account id
+let cfAllTxns    = [];        // all transactions for current account (ascending, from API)
+let cfBalances   = {forecast_balance: 0, verified_balance: 0};
 let cfReconciling = false;
+// Sort / filter / pagination state
+let cfSortCol  = 'date';
+let cfSortDir  = 'desc';
+let cfFilterText = '';
+let cfFilterRec  = 'all';   // 'all' | 'reconciled' | 'unreconciled'
+let cfPage     = 1;
+const CF_PER_PAGE = 50;
 
 // ── Section switching ─────────────────────────────────────────────────────────
 function showSection(section) {
@@ -954,12 +991,10 @@ async function cfLoadAccounts() {
 
 function cfSelectAccount(val) {
   cfCurrentId = val ? parseInt(val) : null;
+  cfPage = 1; cfFilterText = ''; cfFilterRec = 'all';
   cfUpdateToolbar();
   if (cfCurrentId) cfLoadTxns();
-  else {
-    cfTxns = [];
-    renderRegister();
-  }
+  else { cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0}; renderRegister(); }
 }
 
 function cfUpdateToolbar() {
@@ -968,10 +1003,15 @@ function cfUpdateToolbar() {
   document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-delete-acct-btn').style.display = has ? '' : 'none';
-  const acct = cfAccounts.find(a => a.id === cfCurrentId);
-  document.getElementById('cf-balance-summary').textContent = acct
-    ? 'Balance: ' + fmtFull(acct.current_balance)
-    : '';
+  if (has) {
+    const v = fmtFull(cfBalances.verified_balance);
+    const f = fmtFull(cfBalances.forecast_balance);
+    document.getElementById('cf-balance-summary').innerHTML =
+      `<span style="color:var(--green)" title="Reconciled transactions only">✓ ${v}</span>` +
+      `&ensp;<span style="color:var(--text-muted)" title="Including all future/unreconciled transactions">~ ${f}</span>`;
+  } else {
+    document.getElementById('cf-balance-summary').textContent = '';
+  }
 }
 
 async function doDeleteRAcct() {
@@ -981,7 +1021,7 @@ async function doDeleteRAcct() {
   const res = await fetch(`/api/register/accounts/${cfCurrentId}`, {method: 'DELETE'});
   if (res.ok || res.status === 204) {
     cfCurrentId = null;
-    cfTxns = [];
+    cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0};
     if (cfReconciling) { cfReconciling = false; document.getElementById('register-view').classList.remove('hidden'); document.getElementById('reconcile-view').classList.remove('active'); }
     await cfLoadAccounts();
     // Also refresh dashboard account list
@@ -1030,63 +1070,182 @@ async function cfLoadTxns() {
   if (!cfCurrentId) return;
   const res = await fetch(`/api/register/${cfCurrentId}/transactions`);
   if (!res.ok) return;
-  cfTxns = await res.json();
-  // Refresh balance summary
-  await cfLoadAccounts();
+  const data = await res.json();
+  cfAllTxns  = data.transactions || [];
+  cfBalances = {forecast_balance: data.forecast_balance, verified_balance: data.verified_balance};
+  cfUpdateToolbar();
   renderRegister();
   if (cfReconciling) await renderReconcile();
+  // Refresh dashboard register account balances
+  const regRes = await fetch('/api/register/accounts');
+  if (regRes.ok) { cfAccounts = await regRes.json(); renderAccounts(); }
+}
+
+// ── Sort / filter helpers ──────────────────────────────────────────────────────
+function cfSetSort(col) {
+  if (cfSortCol === col) {
+    cfSortDir = cfSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    cfSortCol = col;
+    cfSortDir = col === 'date' ? 'desc' : 'asc';
+  }
+  cfPage = 1;
+  renderRegister();
+}
+
+function cfApplyFilter() {
+  cfFilterText = document.getElementById('reg-search').value.trim().toLowerCase();
+  cfFilterRec  = document.getElementById('reg-rec-filter').value;
+  cfPage = 1;
+  renderRegister();
+}
+
+function cfClearFilter() {
+  document.getElementById('reg-search').value = '';
+  document.getElementById('reg-rec-filter').value = 'all';
+  cfFilterText = ''; cfFilterRec = 'all';
+  cfPage = 1;
+  renderRegister();
+}
+
+function cfChangePage(delta) {
+  cfPage += delta;
+  renderRegister();
+}
+
+// ── Build display groups (manual row + optional bank sub-row) ─────────────────
+function buildGroups(txns) {
+  const byId = Object.fromEntries(txns.map(t => [t.id, t]));
+  const groups = [];
+  const usedBankIds = new Set();
+
+  for (const t of txns) {
+    if (t.source === 'bank') {
+      if (t.matched_to_id) usedBankIds.add(t.id); // will appear as sub-row
+      else groups.push({primary: t, bank: null, isBank: true});
+      continue;
+    }
+    const bank = t.matched_to_id ? (byId[t.matched_to_id] || null) : null;
+    groups.push({primary: t, bank, isBank: false});
+  }
+  return groups;
+}
+
+function filterGroups(groups) {
+  return groups.filter(g => {
+    const t = g.primary;
+    // Reconciled filter
+    if (cfFilterRec === 'reconciled'   && !t.is_reconciled) return false;
+    if (cfFilterRec === 'unreconciled' &&  t.is_reconciled) return false;
+    // Text search across description + bank_description
+    if (cfFilterText) {
+      const haystack = ((t.description || '') + ' ' + (t.bank_description || '') + ' ' +
+                        (g.bank ? g.bank.bank_description || '' : '')).toLowerCase();
+      if (!haystack.includes(cfFilterText)) return false;
+    }
+    return true;
+  });
+}
+
+function sortGroups(groups) {
+  return [...groups].sort((a, b) => {
+    const ta = a.primary, tb = b.primary;
+    let va, vb;
+    switch (cfSortCol) {
+      case 'date':        va = ta.date; vb = tb.date; break;
+      case 'description': va = (ta.description||'').toLowerCase(); vb = (tb.description||'').toLowerCase(); break;
+      case 'credit':      va = ta.amount > 0 ? ta.amount : 0; vb = tb.amount > 0 ? tb.amount : 0; break;
+      case 'debit':       va = ta.amount < 0 ? -ta.amount : 0; vb = tb.amount < 0 ? -tb.amount : 0; break;
+      case 'balance':     va = ta.balance ?? -Infinity; vb = tb.balance ?? -Infinity; break;
+      case 'reconciled':  va = ta.is_reconciled ? 1 : 0; vb = tb.is_reconciled ? 1 : 0; break;
+      default:            va = ta.date; vb = tb.date;
+    }
+    if (va < vb) return cfSortDir === 'asc' ? -1 : 1;
+    if (va > vb) return cfSortDir === 'asc' ?  1 : -1;
+    // Secondary sort: date desc for stable ordering
+    return ta.date > tb.date ? -1 : 1;
+  });
 }
 
 function renderRegister() {
   const tbody = document.getElementById('register-tbody');
+  const filterBar  = document.getElementById('reg-filter-bar');
+  const pagination = document.getElementById('reg-pagination');
+
   if (!cfCurrentId) {
+    filterBar.style.display = 'none'; pagination.style.display = 'none';
     tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
     return;
   }
-  if (!cfTxns.length) {
+  filterBar.style.display = '';
+
+  if (!cfAllTxns.length) {
+    pagination.style.display = 'none';
     tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
     return;
   }
 
-  // Build a map of id→transaction for matched lookups
-  const byId = {};
-  cfTxns.forEach(t => byId[t.id] = t);
+  const allGroups      = buildGroups(cfAllTxns);
+  const filteredGroups = filterGroups(allGroups);
+  const sortedGroups   = sortGroups(filteredGroups);
 
-  // Track which bank txns have been rendered as sub-rows
-  const renderedBankIds = new Set();
+  const total      = sortedGroups.length;
+  const totalPages = Math.max(1, Math.ceil(total / CF_PER_PAGE));
+  cfPage = Math.max(1, Math.min(cfPage, totalPages));
+  const start = (cfPage - 1) * CF_PER_PAGE;
+  const pageGroups = sortedGroups.slice(start, start + CF_PER_PAGE);
 
-  let html = '';
-  cfTxns.forEach(t => {
-    if (t.source === 'bank') {
-      // Bank-only unmatched rows rendered inline
-      if (!t.matched_to_id && !renderedBankIds.has(t.id)) {
-        html += renderBankUnmatchedRow(t);
-        renderedBankIds.add(t.id);
-      }
-      return;
-    }
-    // Manual row
-    html += renderManualRow(t);
-    // If matched, show bank sub-row immediately after
-    if (t.matched_to_id) {
-      const bankTxn = byId[t.matched_to_id];
-      if (bankTxn) {
-        html += renderBankSubRow(bankTxn);
-        renderedBankIds.add(bankTxn.id);
-      }
-    }
+  // Update column header sort indicators
+  document.querySelectorAll('#reg-thead-row th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === cfSortCol) th.classList.add('sort-' + cfSortDir);
   });
 
+  // Update filter controls
+  const hasFilter = cfFilterText || cfFilterRec !== 'all';
+  document.getElementById('reg-clear-filter').style.display = hasFilter ? '' : 'none';
+  document.getElementById('reg-filter-count').textContent =
+    hasFilter ? `${filteredGroups.length} of ${allGroups.length} shown` : `${total} transactions`;
+
+  // Pagination controls
+  if (totalPages > 1) {
+    pagination.style.display = '';
+    document.getElementById('reg-page-info').textContent = `Page ${cfPage} of ${totalPages} (${total} rows)`;
+    document.getElementById('reg-prev').disabled = cfPage === 1;
+    document.getElementById('reg-next').disabled = cfPage === totalPages;
+  } else {
+    pagination.style.display = 'none';
+  }
+
+  // Render rows
+  // Also show unmatched bank txns from cfAllTxns that aren't in this page's groups
+  // (they are included in allGroups naturally)
+  const unmatchedManual = cfAllTxns.filter(t => t.source === 'manual' && !t.matched_to_id && !t.is_reconciled);
+
+  let html = '';
+  for (const g of pageGroups) {
+    if (g.isBank) {
+      html += renderBankUnmatchedRow(g.primary, unmatchedManual);
+    } else {
+      html += renderManualRow(g.primary);
+      if (g.bank) html += renderBankSubRow(g.bank);
+    }
+  }
   tbody.innerHTML = html;
 }
 
 function renderManualRow(t) {
   const credit = t.amount > 0 ? fmtFull(t.amount) : '';
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
-  const bal    = t.balance !== undefined ? fmtFull(t.balance) : '';
-  const recIcon = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
-  const editBtn = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
-  const delBtn  = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
+  // Balance: green/normal when reconciled (verified), muted+italic when forecast
+  const balHtml = t.balance !== undefined
+    ? `<span class="${t.is_reconciled ? 'balance-cell' : 'balance-cell balance-forecast'}"
+         title="${t.is_reconciled ? 'Verified balance' : 'Forecast balance (unreconciled)'}"
+       >${fmtFull(t.balance)}</span>`
+    : '';
+  const recIcon    = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
+  const editBtn    = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
+  const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
   const unmatchBtn = t.matched_to_id
     ? `<button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button>`
     : '';
@@ -1095,7 +1254,7 @@ function renderManualRow(t) {
     <td>${escHtml(t.description)}${t.notes ? `<br><span class="bank-desc">${escHtml(t.notes)}</span>` : ''}</td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
-    <td class="num balance-cell">${bal}</td>
+    <td class="num">${balHtml}</td>
     <td>${recIcon}</td>
     <td><div class="row-actions">${editBtn}${unmatchBtn}${delBtn}</div></td>
   </tr>`;
@@ -1103,7 +1262,7 @@ function renderManualRow(t) {
 
 function renderBankSubRow(t) {
   return `<tr class="row-bank-sub" data-id="${t.id}">
-    <td class="sub-indent" colspan="5" style="padding-left:28px">
+    <td colspan="5" style="padding-left:28px">
       <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>
     </td>
     <td><span class="rec-check">✓</span></td>
@@ -1111,21 +1270,23 @@ function renderBankSubRow(t) {
   </tr>`;
 }
 
-function renderBankUnmatchedRow(t) {
+function renderBankUnmatchedRow(t, unmatchedManual) {
   const credit = t.amount > 0 ? fmtFull(t.amount) : '';
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
+  const opts = (unmatchedManual || [])
+    .map(m => `<option value="${m.id}">${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</option>`)
+    .join('');
+  const safeDesc = JSON.stringify(t.bank_description || t.description).replace(/"/g, '&quot;');
   return `<tr class="row-bank-unmatched" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>
     <td>
       <span class="bank-desc">${escHtml(t.bank_description || t.description)}</span>
       <div class="row-actions" style="margin-top:4px">
-        <select class="match-select" id="match-sel-${t.id}" onchange="">
-          <option value="">Find Match…</option>
-          ${cfTxns.filter(m => m.source === 'manual' && !m.matched_to_id && !m.is_reconciled)
-            .map(m => `<option value="${m.id}">${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</option>`).join('')}
+        <select class="match-select" id="match-sel-${t.id}">
+          <option value="">Find Match…</option>${opts}
         </select>
         <button class="btn-sm btn-primary" onclick="doManualMatch(${t.id})">Match</button>
-        <button class="btn-sm" onclick="openAtl(${t.id}, ${JSON.stringify(t.bank_description || t.description).replace(/"/g, '&quot;')})">+ Add to Ledger</button>
+        <button class="btn-sm" onclick="openAtl(${t.id}, ${safeDesc})">+ Add to Ledger</button>
       </div>
     </td>
     <td class="num amount-credit">${credit}</td>
@@ -1149,40 +1310,50 @@ function openAddTxn() {
   document.getElementById('txn-desc').value = '';
   document.getElementById('txn-amount').value = '';
   document.getElementById('txn-notes').value = '';
-  document.querySelector('input[name="txn-dir"][value="debit"]').checked = true;
   document.getElementById('add-txn-error').style.display = 'none';
   document.getElementById('add-txn-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('txn-desc').focus(), 50);
 }
 function openEditTxn(id) {
-  const t = cfTxns.find(x => x.id === id);
+  const t = cfAllTxns.find(x => x.id === id);
   if (!t) return;
   document.getElementById('add-txn-title').textContent = 'Edit Transaction';
   document.getElementById('edit-txn-id').value = id;
   document.getElementById('txn-date').value = t.date;
   document.getElementById('txn-desc').value = t.description;
-  document.getElementById('txn-amount').value = Math.abs(t.amount);
+  // Show full signed value with 2 decimal places
+  document.getElementById('txn-amount').value = t.amount.toFixed(2);
   document.getElementById('txn-notes').value = t.notes || '';
-  document.querySelector(`input[name="txn-dir"][value="${t.amount >= 0 ? 'credit' : 'debit'}"]`).checked = true;
   document.getElementById('add-txn-error').style.display = 'none';
   document.getElementById('add-txn-modal').classList.remove('hidden');
 }
 function closeAddTxn() { document.getElementById('add-txn-modal').classList.add('hidden'); }
+
+function _parseAmount(raw) {
+  // Strip $, commas, spaces; allow leading minus
+  const cleaned = raw.replace(/[$,\s]/g, '');
+  if (!/^-?\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  return parseFloat(cleaned);
+}
+
 async function doSaveTxn() {
   const editId = document.getElementById('edit-txn-id').value;
   const date = document.getElementById('txn-date').value;
   const description = document.getElementById('txn-desc').value.trim();
-  const rawAmt = parseFloat(document.getElementById('txn-amount').value);
-  const dir = document.querySelector('input[name="txn-dir"]:checked').value;
+  const amount = _parseAmount(document.getElementById('txn-amount').value);
   const notes = document.getElementById('txn-notes').value.trim() || null;
   const errEl = document.getElementById('add-txn-error');
 
-  if (!date || !description || isNaN(rawAmt) || rawAmt <= 0) {
-    errEl.textContent = 'Date, description, and a positive amount are required.';
+  if (!date || !description) {
+    errEl.textContent = 'Date and description are required.';
     errEl.style.display = 'block';
     return;
   }
-  const amount = dir === 'debit' ? -rawAmt : rawAmt;
+  if (amount === null || amount === 0) {
+    errEl.textContent = 'Enter a valid non-zero amount (e.g. -1234.56 or 500.00).';
+    errEl.style.display = 'block';
+    return;
+  }
 
   let res;
   if (editId) {

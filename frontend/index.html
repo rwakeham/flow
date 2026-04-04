@@ -157,6 +157,59 @@ button:hover { background: var(--surface2); }
 /* ── Empty state ── */
 .empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .empty h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+
+/* ── Section nav ── */
+.section-nav { display: flex; gap: 2px; margin-right: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.section-btn { border: none; border-radius: 0; padding: 5px 13px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: transparent; }
+.section-btn.active { background: var(--accent); color: #fff; }
+.section-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+/* ── Cash Flow app ── */
+#cashflow-app { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+#cashflow-app.hidden { display: none; }
+.cf-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.cf-toolbar select { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; min-width: 180px; }
+
+/* ── Register table ── */
+.register-wrap { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.register-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.register-table th { padding: 9px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--surface2); }
+.register-table th.num, .register-table td.num { text-align: right; }
+.register-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.register-table tr:last-child td { border-bottom: none; }
+.register-table tr.row-manual:hover { background: var(--surface2); }
+.register-table tr.row-bank-unmatched { background: rgba(245,158,11,0.07); }
+[data-theme="dark"] .register-table tr.row-bank-unmatched { background: rgba(245,158,11,0.10); }
+.register-table tr.row-bank-sub { background: rgba(245,158,11,0.04); }
+[data-theme="dark"] .register-table tr.row-bank-sub { background: rgba(245,158,11,0.06); }
+.bank-desc { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+.sub-indent { padding-left: 28px !important; }
+.rec-check { color: var(--green); font-size: 13px; }
+.rec-none { color: var(--text-muted); font-size: 11px; }
+.row-actions { display: flex; gap: 4px; align-items: center; }
+.add-row td { padding: 10px 12px; }
+.amount-credit { color: var(--green); }
+.amount-debit  { color: var(--red); }
+.balance-cell { font-weight: 600; }
+
+/* ── Reconcile mode ── */
+#reconcile-view { display: none; }
+#reconcile-view.active { display: block; }
+#register-view { display: block; }
+#register-view.hidden { display: none; }
+.reconcile-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rec-panel { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); }
+.rec-panel-header { padding: 10px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--surface2); border-radius: var(--radius) var(--radius) 0 0; }
+.rec-row { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.rec-row:last-child { border-bottom: none; }
+.rec-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rec-row-date { color: var(--text-muted); font-size: 11px; min-width: 56px; }
+.rec-row-desc { flex: 1; }
+.rec-row-amt { font-weight: 600; white-space: nowrap; }
+.rec-suggestion { font-size: 11px; color: var(--text-muted); padding: 4px 8px; background: var(--surface2); border-radius: var(--radius-sm); margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rec-suggestion strong { color: var(--text); }
+.rec-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.match-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 11px; max-width: 200px; }
 </style>
 </head>
 <body>
@@ -186,9 +239,85 @@ button:hover { background: var(--surface2); }
   </div>
 </div>
 
+<!-- Add Register Account modal -->
+<div id="add-racct-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:500">
+  <div class="modal-box">
+    <h2>New Register Account</h2>
+    <label style="font-size:12px;color:var(--text-muted)">Account Name</label>
+    <input type="text" id="racct-name" placeholder="e.g. WF Checking" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Opening Balance</label>
+    <input type="number" id="racct-opening" value="0" step="0.01" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <div id="add-racct-error" style="color:var(--red);font-size:12px;display:none"></div>
+    <div class="modal-footer">
+      <button onclick="closeAddRAcct()">Cancel</button>
+      <button class="btn-primary" onclick="doAddRAcct()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Transaction modal -->
+<div id="add-txn-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:500">
+  <div class="modal-box">
+    <h2 id="add-txn-title">Add Transaction</h2>
+    <input type="hidden" id="edit-txn-id">
+    <label style="font-size:12px;color:var(--text-muted)">Date</label>
+    <input type="date" id="txn-date" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <label style="font-size:12px;color:var(--text-muted)">Description</label>
+    <input type="text" id="txn-desc" placeholder="Description" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <label style="font-size:12px;color:var(--text-muted)">Amount</label>
+    <div style="display:flex;gap:8px;margin-top:4px;margin-bottom:8px;align-items:center">
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="txn-dir" value="debit" checked> Debit (−)</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="radio" name="txn-dir" value="credit"> Credit (+)</label>
+      <input type="number" id="txn-amount" placeholder="0.00" step="0.01" min="0" style="flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px">
+    </div>
+    <label style="font-size:12px;color:var(--text-muted)">Notes (optional)</label>
+    <input type="text" id="txn-notes" placeholder="" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <div id="add-txn-error" style="color:var(--red);font-size:12px;display:none;margin-top:6px"></div>
+    <div class="modal-footer" style="margin-top:12px">
+      <button onclick="closeAddTxn()">Cancel</button>
+      <button class="btn-primary" onclick="doSaveTxn()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Bank CSV modal -->
+<div id="import-bank-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:500">
+  <div class="modal-box">
+    <h2>Import Bank Export</h2>
+    <p>Upload your bank's tab-separated export file. Duplicate transactions will be skipped automatically.</p>
+    <input type="file" id="bank-import-file" accept=".csv,.tsv,.txt">
+    <div id="bank-import-result" style="font-size:13px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm);display:none"></div>
+    <div class="modal-footer">
+      <button onclick="closeImportBank()">Cancel</button>
+      <button class="btn-primary" onclick="doImportBank()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add to Ledger modal -->
+<div id="add-to-ledger-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:500">
+  <div class="modal-box">
+    <h2>Add to Ledger</h2>
+    <p style="font-size:12px;color:var(--text-muted)" id="atl-bank-desc"></p>
+    <input type="hidden" id="atl-bank-txn-id">
+    <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Description for ledger</label>
+    <input type="text" id="atl-desc" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Notes (optional)</label>
+    <input type="text" id="atl-notes" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <div class="modal-footer" style="margin-top:12px">
+      <button onclick="closeAtl()">Cancel</button>
+      <button class="btn-primary" onclick="doAddToLedger()">Add &amp; Reconcile</button>
+    </div>
+  </div>
+</div>
+
 <!-- Top bar -->
 <div id="topbar">
   <h1>flow</h1>
+  <div class="section-nav">
+    <button class="section-btn active" id="nav-dashboard" onclick="showSection('dashboard')">Dashboard</button>
+    <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>
+  </div>
   <button onclick="openUpload()">↑ Import</button>
   <button id="theme-btn" onclick="toggleTheme()">◑</button>
   <button onclick="doLogout()">Sign out</button>
@@ -284,6 +413,61 @@ button:hover { background: var(--surface2); }
   </div>
 </div>
 
+<!-- Cash Flow App -->
+<div id="cashflow-app" class="hidden">
+  <!-- Toolbar -->
+  <div class="cf-toolbar">
+    <select id="cf-account-select" onchange="cfSelectAccount(this.value)">
+      <option value="">— select account —</option>
+    </select>
+    <button onclick="openAddRAcct()">+ New Account</button>
+    <button onclick="openImportBank()" id="cf-import-btn" style="display:none">↑ Import Bank CSV</button>
+    <button onclick="toggleReconcile()" id="cf-reconcile-btn" style="display:none">⇄ Reconcile</button>
+    <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
+    <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
+  </div>
+
+  <!-- Normal register view -->
+  <div id="register-view">
+    <div class="register-wrap">
+      <table class="register-table">
+        <thead>
+          <tr>
+            <th style="width:90px">Date</th>
+            <th>Description</th>
+            <th class="num" style="width:110px">Credit</th>
+            <th class="num" style="width:110px">Debit</th>
+            <th class="num" style="width:110px">Balance</th>
+            <th style="width:36px">✓</th>
+            <th style="width:80px"></th>
+          </tr>
+        </thead>
+        <tbody id="register-tbody">
+          <tr><td colspan="7" class="empty" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Reconcile view -->
+  <div id="reconcile-view">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:13px;font-weight:600">Reconcile Transactions</span>
+      <button onclick="toggleReconcile()">✕ Done Reconciling</button>
+    </div>
+    <div class="reconcile-panels">
+      <div class="rec-panel">
+        <div class="rec-panel-header">Unmatched Ledger Entries</div>
+        <div id="rec-manual-list"></div>
+      </div>
+      <div class="rec-panel">
+        <div class="rec-panel-header">Unmatched Bank Transactions</div>
+        <div id="rec-bank-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const ASSET_COLORS  = ['#378ADD','#5DCAA5','#D85A30','#7F77DD','#BA7517','#D4537E','#63A02A'];
 const LIAB_COLORS   = ['#E24B4A','#F09595'];
@@ -330,6 +514,7 @@ async function doLogin() {
   if (res.ok) {
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    document.querySelector('#topbar button[onclick="openUpload()"]').style.display = '';
     loadAll();
   } else {
     document.getElementById('login-error').style.display = 'block';
@@ -340,8 +525,13 @@ document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key
 async function doLogout() {
   await fetch('/api/auth/logout', {method:'POST'});
   document.getElementById('app').classList.add('hidden');
+  document.getElementById('cashflow-app').classList.add('hidden');
   document.getElementById('login-overlay').classList.remove('hidden');
   document.getElementById('login-pw').value = '';
+  // Reset section nav
+  document.getElementById('nav-dashboard').classList.add('active');
+  document.getElementById('nav-cashflow').classList.remove('active');
+  cfCurrentId = null; cfTxns = []; cfAccounts = []; cfReconciling = false;
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -677,6 +867,463 @@ function renderAllCharts() {
   document.getElementById('app').classList.remove('hidden');
   loadAll();
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CASH FLOW / REGISTER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let cfAccounts = [];       // list of register accounts
+let cfCurrentId = null;   // selected register_account id
+let cfTxns = [];           // current transaction list (from API)
+let cfReconciling = false;
+
+// ── Section switching ─────────────────────────────────────────────────────────
+function showSection(section) {
+  const isDash = section === 'dashboard';
+  document.getElementById('app').classList.toggle('hidden', !isDash);
+  document.getElementById('cashflow-app').classList.toggle('hidden', isDash);
+  document.getElementById('nav-dashboard').classList.toggle('active', isDash);
+  document.getElementById('nav-cashflow').classList.toggle('active', !isDash);
+  // Hide the net-worth Import button when in Cash Flow view
+  document.querySelector('#topbar button[onclick="openUpload()"]').style.display = isDash ? '' : 'none';
+  if (!isDash) cfLoadAccounts();
+}
+
+// ── Formatting helpers (cf-specific) ─────────────────────────────────────────
+function fmtFull(v) {
+  if (v === null || v === undefined) return '—';
+  const sign = v < 0 ? '-' : '';
+  return sign + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function cfFmtDate(s) {
+  const d = new Date(s + 'T00:00:00');
+  return (d.getMonth()+1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(-2);
+}
+function todayIso() {
+  return new Date().toISOString().slice(0,10);
+}
+
+// ── Register Accounts ─────────────────────────────────────────────────────────
+async function cfLoadAccounts() {
+  const res = await fetch('/api/register/accounts');
+  if (!res.ok) return;
+  cfAccounts = await res.json();
+  const sel = document.getElementById('cf-account-select');
+  const prev = cfCurrentId;
+  sel.innerHTML = '<option value="">— select account —</option>' +
+    cfAccounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+  if (prev && cfAccounts.find(a => a.id === prev)) {
+    sel.value = prev;
+  } else if (cfAccounts.length === 1) {
+    sel.value = cfAccounts[0].id;
+    cfCurrentId = cfAccounts[0].id;
+  }
+  if (cfCurrentId) cfLoadTxns();
+  cfUpdateToolbar();
+}
+
+function cfSelectAccount(val) {
+  cfCurrentId = val ? parseInt(val) : null;
+  cfUpdateToolbar();
+  if (cfCurrentId) cfLoadTxns();
+  else {
+    cfTxns = [];
+    renderRegister();
+  }
+}
+
+function cfUpdateToolbar() {
+  const has = !!cfCurrentId;
+  document.getElementById('cf-import-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
+  const acct = cfAccounts.find(a => a.id === cfCurrentId);
+  document.getElementById('cf-balance-summary').textContent = acct
+    ? 'Balance: ' + fmtFull(acct.current_balance)
+    : '';
+}
+
+// ── Add Register Account ──────────────────────────────────────────────────────
+function openAddRAcct() {
+  document.getElementById('add-racct-modal').classList.remove('hidden');
+  document.getElementById('racct-name').value = '';
+  document.getElementById('racct-opening').value = '0';
+  document.getElementById('add-racct-error').style.display = 'none';
+  setTimeout(() => document.getElementById('racct-name').focus(), 50);
+}
+function closeAddRAcct() { document.getElementById('add-racct-modal').classList.add('hidden'); }
+async function doAddRAcct() {
+  const name = document.getElementById('racct-name').value.trim();
+  const opening = parseFloat(document.getElementById('racct-opening').value) || 0;
+  const errEl = document.getElementById('add-racct-error');
+  if (!name) { errEl.textContent = 'Name is required'; errEl.style.display = 'block'; return; }
+  const res = await fetch('/api/register/accounts', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, opening_balance: opening})
+  });
+  if (res.ok) {
+    const d = await res.json();
+    closeAddRAcct();
+    cfCurrentId = d.id;
+    await cfLoadAccounts();
+    document.getElementById('cf-account-select').value = d.id;
+  } else {
+    const d = await res.json().catch(() => ({}));
+    errEl.textContent = d.detail || 'Failed to create account';
+    errEl.style.display = 'block';
+  }
+}
+
+// ── Load & render transactions ────────────────────────────────────────────────
+async function cfLoadTxns() {
+  if (!cfCurrentId) return;
+  const res = await fetch(`/api/register/${cfCurrentId}/transactions`);
+  if (!res.ok) return;
+  cfTxns = await res.json();
+  // Refresh balance summary
+  await cfLoadAccounts();
+  renderRegister();
+  if (cfReconciling) await renderReconcile();
+}
+
+function renderRegister() {
+  const tbody = document.getElementById('register-tbody');
+  if (!cfCurrentId) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
+    return;
+  }
+  if (!cfTxns.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
+    return;
+  }
+
+  // Build a map of id→transaction for matched lookups
+  const byId = {};
+  cfTxns.forEach(t => byId[t.id] = t);
+
+  // Track which bank txns have been rendered as sub-rows
+  const renderedBankIds = new Set();
+
+  let html = '';
+  cfTxns.forEach(t => {
+    if (t.source === 'bank') {
+      // Bank-only unmatched rows rendered inline
+      if (!t.matched_to_id && !renderedBankIds.has(t.id)) {
+        html += renderBankUnmatchedRow(t);
+        renderedBankIds.add(t.id);
+      }
+      return;
+    }
+    // Manual row
+    html += renderManualRow(t);
+    // If matched, show bank sub-row immediately after
+    if (t.matched_to_id) {
+      const bankTxn = byId[t.matched_to_id];
+      if (bankTxn) {
+        html += renderBankSubRow(bankTxn);
+        renderedBankIds.add(bankTxn.id);
+      }
+    }
+  });
+
+  tbody.innerHTML = html;
+}
+
+function renderManualRow(t) {
+  const credit = t.amount > 0 ? fmtFull(t.amount) : '';
+  const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
+  const bal    = t.balance !== undefined ? fmtFull(t.balance) : '';
+  const recIcon = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
+  const editBtn = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
+  const delBtn  = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
+  const unmatchBtn = t.matched_to_id
+    ? `<button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button>`
+    : '';
+  return `<tr class="row-manual" data-id="${t.id}">
+    <td>${cfFmtDate(t.date)}</td>
+    <td>${escHtml(t.description)}${t.notes ? `<br><span class="bank-desc">${escHtml(t.notes)}</span>` : ''}</td>
+    <td class="num amount-credit">${credit}</td>
+    <td class="num amount-debit">${debit}</td>
+    <td class="num balance-cell">${bal}</td>
+    <td>${recIcon}</td>
+    <td><div class="row-actions">${editBtn}${unmatchBtn}${delBtn}</div></td>
+  </tr>`;
+}
+
+function renderBankSubRow(t) {
+  return `<tr class="row-bank-sub" data-id="${t.id}">
+    <td class="sub-indent" colspan="5" style="padding-left:28px">
+      <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>
+    </td>
+    <td><span class="rec-check">✓</span></td>
+    <td><button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button></td>
+  </tr>`;
+}
+
+function renderBankUnmatchedRow(t) {
+  const credit = t.amount > 0 ? fmtFull(t.amount) : '';
+  const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
+  return `<tr class="row-bank-unmatched" data-id="${t.id}">
+    <td>${cfFmtDate(t.date)}</td>
+    <td>
+      <span class="bank-desc">${escHtml(t.bank_description || t.description)}</span>
+      <div class="row-actions" style="margin-top:4px">
+        <select class="match-select" id="match-sel-${t.id}" onchange="">
+          <option value="">Find Match…</option>
+          ${cfTxns.filter(m => m.source === 'manual' && !m.matched_to_id && !m.is_reconciled)
+            .map(m => `<option value="${m.id}">${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</option>`).join('')}
+        </select>
+        <button class="btn-sm btn-primary" onclick="doManualMatch(${t.id})">Match</button>
+        <button class="btn-sm" onclick="openAtl(${t.id}, ${JSON.stringify(t.bank_description || t.description).replace(/"/g, '&quot;')})">+ Add to Ledger</button>
+      </div>
+    </td>
+    <td class="num amount-credit">${credit}</td>
+    <td class="num amount-debit">${debit}</td>
+    <td></td>
+    <td><span class="rec-none">?</span></td>
+    <td><button class="btn-sm" onclick="doDeleteTxn(${t.id})" style="color:var(--red)" title="Delete">✕</button></td>
+  </tr>`;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Add / Edit Transaction ────────────────────────────────────────────────────
+function openAddTxn() {
+  document.getElementById('add-txn-title').textContent = 'Add Transaction';
+  document.getElementById('edit-txn-id').value = '';
+  document.getElementById('txn-date').value = todayIso();
+  document.getElementById('txn-desc').value = '';
+  document.getElementById('txn-amount').value = '';
+  document.getElementById('txn-notes').value = '';
+  document.querySelector('input[name="txn-dir"][value="debit"]').checked = true;
+  document.getElementById('add-txn-error').style.display = 'none';
+  document.getElementById('add-txn-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('txn-desc').focus(), 50);
+}
+function openEditTxn(id) {
+  const t = cfTxns.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('add-txn-title').textContent = 'Edit Transaction';
+  document.getElementById('edit-txn-id').value = id;
+  document.getElementById('txn-date').value = t.date;
+  document.getElementById('txn-desc').value = t.description;
+  document.getElementById('txn-amount').value = Math.abs(t.amount);
+  document.getElementById('txn-notes').value = t.notes || '';
+  document.querySelector(`input[name="txn-dir"][value="${t.amount >= 0 ? 'credit' : 'debit'}"]`).checked = true;
+  document.getElementById('add-txn-error').style.display = 'none';
+  document.getElementById('add-txn-modal').classList.remove('hidden');
+}
+function closeAddTxn() { document.getElementById('add-txn-modal').classList.add('hidden'); }
+async function doSaveTxn() {
+  const editId = document.getElementById('edit-txn-id').value;
+  const date = document.getElementById('txn-date').value;
+  const description = document.getElementById('txn-desc').value.trim();
+  const rawAmt = parseFloat(document.getElementById('txn-amount').value);
+  const dir = document.querySelector('input[name="txn-dir"]:checked').value;
+  const notes = document.getElementById('txn-notes').value.trim() || null;
+  const errEl = document.getElementById('add-txn-error');
+
+  if (!date || !description || isNaN(rawAmt) || rawAmt <= 0) {
+    errEl.textContent = 'Date, description, and a positive amount are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const amount = dir === 'debit' ? -rawAmt : rawAmt;
+
+  let res;
+  if (editId) {
+    res = await fetch(`/api/register/transactions/${editId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({date, description, amount, notes})
+    });
+  } else {
+    res = await fetch(`/api/register/${cfCurrentId}/transactions`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({date, description, amount, notes})
+    });
+  }
+
+  if (res.ok) {
+    closeAddTxn();
+    await cfLoadTxns();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    errEl.textContent = d.detail || 'Failed to save transaction';
+    errEl.style.display = 'block';
+  }
+}
+
+// ── Delete transaction ────────────────────────────────────────────────────────
+async function doDeleteTxn(id) {
+  if (!confirm('Delete this transaction?')) return;
+  const res = await fetch(`/api/register/transactions/${id}`, {method:'DELETE'});
+  if (res.ok || res.status === 204) await cfLoadTxns();
+}
+
+// ── Unmatch ───────────────────────────────────────────────────────────────────
+async function doUnmatch(id) {
+  const res = await fetch('/api/register/reconcile/unmatch', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({txn_id: id})
+  });
+  if (res.ok) await cfLoadTxns();
+}
+
+// ── Manual match (from bank row dropdown) ─────────────────────────────────────
+async function doManualMatch(bankId) {
+  const manualId = parseInt(document.getElementById(`match-sel-${bankId}`)?.value);
+  if (!manualId) { alert('Please select a ledger entry to match with.'); return; }
+  const res = await fetch('/api/register/reconcile/match', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bank_txn_id: bankId, manual_txn_id: manualId})
+  });
+  if (res.ok) await cfLoadTxns();
+}
+
+// ── Import Bank CSV ───────────────────────────────────────────────────────────
+function openImportBank() {
+  document.getElementById('import-bank-modal').classList.remove('hidden');
+  document.getElementById('bank-import-file').value = '';
+  document.getElementById('bank-import-result').style.display = 'none';
+}
+function closeImportBank() { document.getElementById('import-bank-modal').classList.add('hidden'); }
+async function doImportBank() {
+  const f = document.getElementById('bank-import-file').files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  const res = await fetch(`/api/register/${cfCurrentId}/import`, {method:'POST', body: fd});
+  const r = document.getElementById('bank-import-result');
+  r.style.display = 'block';
+  if (res.ok) {
+    const d = await res.json();
+    r.style.color = 'var(--green)';
+    r.innerHTML = `✓ Imported ${d.imported} transactions. Auto-matched: ${d.auto_matched}. Unmatched: ${d.unmatched}.`
+      + (d.unmatched > 0 ? ' <a href="#" onclick="closeImportBank();toggleReconcile();return false" style="color:var(--accent)">Reconcile now →</a>' : '');
+    await cfLoadTxns();
+  } else {
+    const d = await res.json().catch(() => ({detail:'Import failed'}));
+    r.style.color = 'var(--red)';
+    r.textContent = '✗ ' + (d.detail || 'Import failed');
+  }
+}
+
+// ── Add to Ledger ─────────────────────────────────────────────────────────────
+function openAtl(bankId, bankDesc) {
+  document.getElementById('atl-bank-txn-id').value = bankId;
+  document.getElementById('atl-bank-desc').textContent = 'Bank: ' + bankDesc;
+  document.getElementById('atl-desc').value = bankDesc;
+  document.getElementById('atl-notes').value = '';
+  document.getElementById('add-to-ledger-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('atl-desc').focus(), 50);
+}
+function closeAtl() { document.getElementById('add-to-ledger-modal').classList.add('hidden'); }
+async function doAddToLedger() {
+  const bankId = parseInt(document.getElementById('atl-bank-txn-id').value);
+  const description = document.getElementById('atl-desc').value.trim();
+  const notes = document.getElementById('atl-notes').value.trim() || null;
+  const res = await fetch('/api/register/reconcile/add-to-ledger', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bank_txn_id: bankId, description, notes})
+  });
+  if (res.ok) {
+    closeAtl();
+    await cfLoadTxns();
+  }
+}
+
+// ── Reconcile mode ────────────────────────────────────────────────────────────
+async function toggleReconcile() {
+  cfReconciling = !cfReconciling;
+  document.getElementById('register-view').classList.toggle('hidden', cfReconciling);
+  document.getElementById('reconcile-view').classList.toggle('active', cfReconciling);
+  document.getElementById('cf-reconcile-btn').textContent = cfReconciling ? '✕ Exit Reconcile' : '⇄ Reconcile';
+  if (cfReconciling) await renderReconcile();
+}
+
+async function renderReconcile() {
+  if (!cfCurrentId) return;
+  const res = await fetch(`/api/register/${cfCurrentId}/reconcile`);
+  if (!res.ok) return;
+  const data = await res.json();
+
+  // Build manual list
+  const manualEl = document.getElementById('rec-manual-list');
+  if (!data.unmatched_manual.length) {
+    manualEl.innerHTML = '<div class="rec-row" style="color:var(--text-muted);font-size:12px">All ledger entries matched.</div>';
+  } else {
+    manualEl.innerHTML = data.unmatched_manual.map(t => `
+      <div class="rec-row" data-id="${t.id}">
+        <div class="rec-row-top">
+          <span class="rec-row-date">${cfFmtDate(t.date)}</span>
+          <span class="rec-row-desc">${escHtml(t.description)}</span>
+          <span class="rec-row-amt ${t.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(t.amount)}</span>
+        </div>
+        <div class="rec-actions">
+          <button class="btn-sm" onclick="doMarkReconciled(${t.id})">Mark Reconciled</button>
+        </div>
+      </div>`).join('');
+  }
+
+  // Build bank list
+  const bankEl = document.getElementById('rec-bank-list');
+  if (!data.unmatched_bank.length) {
+    bankEl.innerHTML = '<div class="rec-row" style="color:var(--text-muted);font-size:12px">All bank transactions matched.</div>';
+  } else {
+    const manualOptions = data.unmatched_manual.map(m =>
+      `<option value="${m.id}">${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</option>`
+    ).join('');
+
+    bankEl.innerHTML = data.unmatched_bank.map(t => {
+      const sug = t.suggestion;
+      const sugHtml = sug ? `
+        <div class="rec-suggestion">
+          <strong>Suggested:</strong>
+          ${escHtml(data.unmatched_manual.find(m => m.id === sug.manual_id)?.description || '?')}
+          (score ${(sug.score * 100).toFixed(0)}%)
+          <button class="btn-sm btn-primary" onclick="doRecMatch(${t.id}, ${sug.manual_id})">✓ Match</button>
+        </div>` : '';
+      return `
+        <div class="rec-row" data-id="${t.id}">
+          <div class="rec-row-top">
+            <span class="rec-row-date">${cfFmtDate(t.date)}</span>
+            <span class="rec-row-desc bank-desc">${escHtml(t.bank_description || t.description)}</span>
+            <span class="rec-row-amt ${t.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(t.amount)}</span>
+          </div>
+          ${sugHtml}
+          <div class="rec-actions">
+            <select class="match-select" id="rec-sel-${t.id}">
+              <option value="">Find Match…</option>
+              ${manualOptions}
+            </select>
+            <button class="btn-sm" onclick="doRecMatchSel(${t.id})">Match</button>
+            <button class="btn-sm" onclick="openAtl(${t.id}, ${JSON.stringify(t.bank_description || t.description).replace(/"/g,'&quot;')})">+ Add to Ledger</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+}
+
+async function doMarkReconciled(id) {
+  const res = await fetch(`/api/register/transactions/${id}/mark-reconciled`, {method:'POST'});
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+
+async function doRecMatch(bankId, manualId) {
+  const res = await fetch('/api/register/reconcile/match', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bank_txn_id: bankId, manual_txn_id: manualId})
+  });
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+
+async function doRecMatchSel(bankId) {
+  const manualId = parseInt(document.getElementById(`rec-sel-${bankId}`)?.value);
+  if (!manualId) { alert('Select a ledger entry to match.'); return; }
+  await doRecMatch(bankId, manualId);
+}
 </script>
 </body>
 </html>

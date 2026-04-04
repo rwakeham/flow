@@ -222,7 +222,9 @@ button:hover { background: var(--surface2); }
 
 /* ── Register filter bar ── */
 .reg-filter-bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.reg-filter-bar input[type=text] { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; min-width: 180px; flex: 1; }
+.reg-filter-bar input[type=text],
+.reg-filter-bar input[type=number] { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
+.reg-filter-bar input[type=text] { min-width: 180px; flex: 1; }
 .reg-filter-bar select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
 .reg-filter-bar .filter-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
 /* ── Sortable headers ── */

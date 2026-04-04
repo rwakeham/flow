@@ -1,12 +1,11 @@
 """
 Fuzzy matching between bank-imported transactions and manual ledger entries.
 
-Scoring criteria for each (bank, manual) candidate pair:
-  - Amount must be within tolerance: max(|amount| * 2%, $5.00)
-  - Date must be within ±10 days
-  If both pass:
-    score = 0.40 * amount_score + 0.30 * date_score + 0.30 * description_score
-  Returns best match per bank transaction if score > 0.25.
+Matching rules:
+  1. EXACT match: identical date and amount → always suggest (regardless of description).
+  2. CLOSE match: amount within max(|amount| * 10%, $5.00) and date within ±14 days.
+     score = 0.40 * amount_score + 0.30 * date_score + 0.30 * description_score
+     Returned only if score >= min_score (default 0.25).
 """
 
 from __future__ import annotations
@@ -36,17 +35,12 @@ _STOPWORDS = {
     "is", "it", "its", "be", "as", "by", "from", "with",
 }
 
-# Strip purely numeric tokens (reference numbers, dates embedded in descriptions)
-_NOISE_RE = re.compile(r"\b[\d\W]+\b")
-
 
 def _keywords(text: str) -> set[str]:
     """Extract meaningful words from a description string."""
     lowered = text.lower()
-    # Replace non-alphanumeric with space
     cleaned = re.sub(r"[^a-z0-9 ]", " ", lowered)
     tokens = cleaned.split()
-    # Keep tokens that are at least 3 chars and not pure digits and not stopwords
     return {t for t in tokens if len(t) >= 3 and not t.isdigit() and t not in _STOPWORDS}
 
 
@@ -68,7 +62,8 @@ def suggest_matches(
 ) -> list[MatchSuggestion]:
     """
     For each bank transaction, find the best-scoring unmatched manual transaction.
-    Returns one suggestion per bank transaction (highest score above min_score).
+
+    Returns one suggestion per bank transaction (highest score above threshold).
     A manual transaction may appear as the suggestion for multiple bank transactions
     (the UI lets the user confirm/reject).
     """
@@ -77,35 +72,49 @@ def suggest_matches(
     for bank in bank_txns:
         best_score = -1.0
         best_manual_id: int | None = None
+        best_is_exact = False
 
-        amount_tolerance = max(abs(bank.amount) * 0.02, 5.00)
+        amount_tolerance = max(abs(bank.amount) * 0.10, 5.00)
+        date_window = 14
 
         for manual in manual_txns:
-            # Gate 1: amount within tolerance
             amount_diff = abs(bank.amount - manual.amount)
+            date_diff = abs((bank.date - manual.date).days)
+
+            # Rule 1: identical date + identical amount → always suggest
+            if amount_diff == 0 and date_diff == 0:
+                desc_score = _description_score(bank.description, manual.description)
+                # Perfect amount + date: weight heavily so it always wins
+                score = 0.40 * 1.0 + 0.30 * 1.0 + 0.30 * desc_score
+                if score > best_score:
+                    best_score = score
+                    best_manual_id = manual.id
+                    best_is_exact = True
+                continue
+
+            # Rule 2: close match — amount within tolerance and date within window
             if amount_diff > amount_tolerance:
                 continue
-
-            # Gate 2: date within ±10 days
-            date_diff = abs((bank.date - manual.date).days)
-            if date_diff > 10:
+            if date_diff > date_window:
                 continue
 
-            # Compute composite score
             amount_score = 1.0 - (amount_diff / amount_tolerance)
-            date_score = 1.0 - (date_diff / 10)
+            date_score = 1.0 - (date_diff / date_window)
             desc_score = _description_score(bank.description, manual.description)
             score = 0.40 * amount_score + 0.30 * date_score + 0.30 * desc_score
 
             if score > best_score:
                 best_score = score
                 best_manual_id = manual.id
+                best_is_exact = False
 
-        if best_manual_id is not None and best_score >= min_score:
-            suggestions.append(MatchSuggestion(
-                bank_id=bank.id,
-                manual_id=best_manual_id,
-                score=round(best_score, 4),
-            ))
+        if best_manual_id is not None:
+            # Exact matches bypass min_score; fuzzy matches must meet threshold
+            if best_is_exact or best_score >= min_score:
+                suggestions.append(MatchSuggestion(
+                    bank_id=bank.id,
+                    manual_id=best_manual_id,
+                    score=round(best_score, 4),
+                ))
 
     return suggestions

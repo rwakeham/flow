@@ -1118,8 +1118,8 @@ function cfUpdateToolbar() {
     const v = fmtFull(cfBalances.verified_balance);
     const f = fmtFull(cfBalances.forecast_balance);
     document.getElementById('cf-balance-summary').innerHTML =
-      `<span style="color:var(--green)" title="Reconciled transactions only">✓ ${v}</span>` +
-      `&ensp;<span style="color:var(--text-muted)" title="Including all future/unreconciled transactions">~ ${f}</span>`;
+      `<span title="Reconciled transactions only">✓ ${v}</span>` +
+      `&ensp;<span style="font-style:italic" title="Including all future/unreconciled transactions">~ ${f}</span>`;
   } else {
     document.getElementById('cf-balance-summary').textContent = '';
   }

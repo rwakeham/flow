@@ -1443,16 +1443,13 @@ function renderManualRow(t) {
   const editBtn    = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
   const dupeBtn    = `<button class="btn-sm" onclick="openDupeTxn(${t.id})" title="Duplicate">⧉</button>`;
   const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
-  const unmatchBtn = t.matched_to_id
-    ? `<button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button>`
-    : '';
   return `<tr class="row-manual" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>
     <td>${escHtml(t.description)}${t.notes ? `<br><span class="bank-desc">${escHtml(t.notes)}</span>` : ''}</td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
     <td>${recIcon}</td>
-    <td><div class="row-actions">${editBtn}${dupeBtn}${unmatchBtn}${delBtn}</div></td>
+    <td><div class="row-actions">${editBtn}${dupeBtn}${delBtn}</div></td>
   </tr>`;
 }
 

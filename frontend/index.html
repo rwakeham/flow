@@ -1454,7 +1454,8 @@ function renderManualRow(t) {
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
   const recIcon    = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
   const editBtn    = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
-  const dupeBtn    = `<button class="btn-sm" onclick="openDupeTxn(${t.id})" title="Duplicate">⧉</button>`;
+  const dupeBtn    = !t.bank_description
+    ? `<button class="btn-sm" onclick="openDupeTxn(${t.id})" title="Duplicate">⧉</button>` : '';
   const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
   return `<tr class="row-manual" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>

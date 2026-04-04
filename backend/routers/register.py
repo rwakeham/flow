@@ -97,6 +97,7 @@ class RegisterAccountUpdate(BaseModel):
     cutoff_date: DateType | None = None
     cutoff_balance: float | None = None
     clear_cutoff: bool = False  # explicitly clear the cutoff when True
+    is_default: bool | None = None
 
 
 def _acct_dict(acct: RegisterAccount, current_balance: float) -> dict:
@@ -108,6 +109,7 @@ def _acct_dict(acct: RegisterAccount, current_balance: float) -> dict:
         "cutoff_date": acct.cutoff_date.isoformat() if acct.cutoff_date else None,
         "cutoff_balance": float(acct.cutoff_balance) if acct.cutoff_balance is not None else None,
         "current_balance": round(current_balance, 2),
+        "is_default": bool(acct.is_default),
     }
 
 
@@ -238,6 +240,10 @@ def update_register_account(account_id: int, body: RegisterAccountUpdate, db: Se
     elif body.cutoff_date is not None:
         acct.cutoff_date = body.cutoff_date
         acct.cutoff_balance = body.cutoff_balance  # may be None if user only set date
+    if body.is_default is not None:
+        if body.is_default:
+            db.query(RegisterAccount).filter(RegisterAccount.id != account_id).update({"is_default": False})
+        acct.is_default = body.is_default
     db.commit()
     db.refresh(acct)
     opening, cutoff_date = _effective_opening(acct)

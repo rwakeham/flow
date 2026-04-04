@@ -297,11 +297,22 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
     """
     Import rows from a bank export as bank transactions, then run auto-matching
     against any existing unmatched manual transactions.
+
+    Dedup logic (in order):
+      1. Skip if an identical bank row already exists (same date/amount/description).
+      2. If an already-reconciled manual entry exists with the exact same date and
+         amount (and no bank row linked yet), import the bank row and link it to
+         that manual entry immediately — handles re-importing historical data that
+         was previously reconciled from a ledger spreadsheet import.
+      3. Otherwise import as an unmatched bank row and run fuzzy auto-matching.
     """
     imported = 0
+    auto_matched = 0
     new_bank_txns: list[Transaction] = []
+
     for row in rows:
-        existing = db.execute(
+        # 1. Skip exact bank duplicates
+        existing_bank = db.execute(
             text("""
                 SELECT id FROM transactions
                 WHERE register_account_id = :aid
@@ -313,8 +324,24 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
             """),
             {"aid": account_id, "dt": row.date, "amt": row.amount, "desc": row.bank_description},
         ).fetchone()
-        if existing:
+        if existing_bank:
             continue
+
+        # 2. Check for an already-reconciled manual entry with same date + amount
+        #    that hasn't been linked to a bank row yet.
+        reconciled_manual = db.execute(
+            text("""
+                SELECT id FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'manual'
+                  AND date = :dt
+                  AND amount = :amt
+                  AND is_reconciled = TRUE
+                  AND matched_to_id IS NULL
+                LIMIT 1
+            """),
+            {"aid": account_id, "dt": row.date, "amt": float(row.amount)},
+        ).fetchone()
 
         txn = Transaction(
             register_account_id=account_id,
@@ -327,14 +354,22 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
         )
         db.add(txn)
         db.flush()
-        new_bank_txns.append(txn)
         imported += 1
+
+        if reconciled_manual:
+            manual_txn = db.get(Transaction, reconciled_manual.id)
+            txn.matched_to_id = manual_txn.id
+            txn.is_reconciled = True
+            manual_txn.matched_to_id = txn.id
+            auto_matched += 1
+        else:
+            new_bank_txns.append(txn)
 
     if not new_bank_txns:
         db.commit()
-        return {"format": "bank", "imported": 0, "auto_matched": 0, "unmatched": 0}
+        return {"format": "bank", "imported": imported, "auto_matched": auto_matched, "unmatched": 0}
 
-    # Auto-match against existing unmatched manual transactions
+    # 3. Fuzzy auto-match remaining new bank rows against unreconciled manual entries
     unmatched_manual = (
         db.query(Transaction)
         .filter(
@@ -358,7 +393,6 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
     suggestions = suggest_matches(bank_infos, manual_infos)
 
     used_manual_ids: set[int] = set()
-    auto_matched = 0
     for suggestion in sorted(suggestions, key=lambda s: -s.score):
         if suggestion.manual_id in used_manual_ids:
             continue

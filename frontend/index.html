@@ -376,7 +376,6 @@ button:hover { background: var(--surface2); }
     <button class="section-btn active" id="nav-dashboard" onclick="showSection('dashboard')">Dashboard</button>
     <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>
   </div>
-  <button onclick="openUpload()">↑ Import</button>
   <button id="theme-btn" onclick="toggleTheme()">◑</button>
   <button onclick="doLogout()">Sign out</button>
 </div>
@@ -464,7 +463,10 @@ button:hover { background: var(--surface2); }
 
   <!-- Account manager -->
   <div id="acct-panel">
-    <button id="acct-toggle" onclick="toggleAcctPanel()">▸ Manage Accounts</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button id="acct-toggle" onclick="toggleAcctPanel()">▸ Manage Accounts</button>
+      <button onclick="openUpload()">↑ Import</button>
+    </div>
     <div id="acct-body">
       <div id="acct-list"></div>
     </div>

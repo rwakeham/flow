@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from auth import clear_session_cookie, create_session_cookie, require_auth, verify_password
 from database import Base, engine
-from routers import data, upload
+from routers import data, upload, register
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.add_middleware(
 
 app.include_router(upload.router)
 app.include_router(data.router)
+app.include_router(register.router)
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────

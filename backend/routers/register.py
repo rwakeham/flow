@@ -757,6 +757,8 @@ def add_to_ledger(body: AddToLedgerBody, db: Session = Depends(get_db)):
         amount=bank_txn.amount,
         source="manual",
         notes=body.notes,
+        # Mark with bank_description so it is excluded from the description autocomplete
+        bank_description=bank_txn.bank_description,
     )
     db.add(manual_txn)
     db.flush()
@@ -769,3 +771,35 @@ def add_to_ledger(body: AddToLedgerBody, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(manual_txn)
     return _txn_dict(manual_txn)
+
+
+class BulkAddToLedgerBody(BaseModel):
+    bank_txn_ids: list[int]
+
+
+@router.post("/reconcile/bulk-add-to-ledger", status_code=200)
+def bulk_add_to_ledger(body: BulkAddToLedgerBody, db: Session = Depends(get_db)):
+    """Add multiple unmatched bank transactions to the ledger in one shot."""
+    added = 0
+    for bank_id in body.bank_txn_ids:
+        bank_txn = db.get(Transaction, bank_id)
+        if bank_txn is None or bank_txn.source != "bank" or bank_txn.matched_to_id is not None:
+            continue
+        description = bank_txn.bank_description or "(imported)"
+        manual_txn = Transaction(
+            register_account_id=bank_txn.register_account_id,
+            date=bank_txn.date,
+            description=description,
+            amount=bank_txn.amount,
+            source="manual",
+            bank_description=bank_txn.bank_description,
+        )
+        db.add(manual_txn)
+        db.flush()
+        bank_txn.matched_to_id = manual_txn.id
+        bank_txn.is_reconciled = True
+        manual_txn.matched_to_id = bank_txn.id
+        manual_txn.is_reconciled = True
+        added += 1
+    db.commit()
+    return {"added": added}

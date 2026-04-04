@@ -28,6 +28,19 @@ async def lifespan(app: FastAPI):
         conn.execute(text(
             "ALTER TABLE register_accounts ADD COLUMN IF NOT EXISTS cutoff_balance NUMERIC(18,2)"
         ))
+        # Backfill bank_description on manual transactions created via Add-to-Ledger.
+        # These have source='manual' but bank_description was not copied at creation time,
+        # causing them to appear in the description autocomplete alongside user-typed entries.
+        conn.execute(text("""
+            UPDATE transactions AS m
+               SET bank_description = b.bank_description
+              FROM transactions AS b
+             WHERE m.source          = 'manual'
+               AND m.matched_to_id   = b.id
+               AND b.source          = 'bank'
+               AND b.bank_description IS NOT NULL
+               AND m.bank_description IS NULL
+        """))
         conn.commit()
     yield
 

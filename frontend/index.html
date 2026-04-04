@@ -552,7 +552,17 @@ button:hover { background: var(--surface2); }
         <div id="rec-manual-list"></div>
       </div>
       <div class="rec-panel">
-        <div class="rec-panel-header">Unmatched Bank Transactions</div>
+        <div class="rec-panel-header" style="display:flex;align-items:center;gap:8px">
+          <span style="flex:1">Unmatched Bank Transactions</span>
+          <label style="font-size:11px;font-weight:400;display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="rec-select-all" onchange="recToggleAll(this.checked)"> All
+          </label>
+        </div>
+        <div id="rec-bulk-bar" style="display:none;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;gap:8px;align-items:center">
+          <span id="rec-sel-count" style="font-size:12px;color:var(--text-muted);flex:1"></span>
+          <button class="btn-sm btn-primary" onclick="doBulkAddToLedger()">+ Add Selected to Ledger</button>
+          <button class="btn-sm" style="color:var(--red)" onclick="doBulkDelete()">Delete Selected</button>
+        </div>
         <div id="rec-bank-list"></div>
       </div>
     </div>
@@ -1826,6 +1836,7 @@ async function renderReconcile() {
       return `
         <div class="rec-row" data-id="${t.id}">
           <div class="rec-row-top">
+            <input type="checkbox" class="rec-bank-chk" data-id="${t.id}" onchange="recUpdateBulkBar()" style="margin-right:4px;flex-shrink:0">
             <span class="rec-row-date">${cfFmtDate(t.date)}</span>
             <span class="rec-row-desc bank-desc">${escHtml(t.bank_description || t.description)}</span>
             <span class="rec-row-amt ${t.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(t.amount)}</span>
@@ -1841,7 +1852,48 @@ async function renderReconcile() {
           </div>
         </div>`;
     }).join('');
+    recUpdateBulkBar();
   }
+}
+
+function _recCheckedIds() {
+  return [...document.querySelectorAll('.rec-bank-chk:checked')].map(el => parseInt(el.dataset.id));
+}
+
+function recToggleAll(checked) {
+  document.querySelectorAll('.rec-bank-chk').forEach(el => el.checked = checked);
+  recUpdateBulkBar();
+}
+
+function recUpdateBulkBar() {
+  const ids = _recCheckedIds();
+  const bar = document.getElementById('rec-bulk-bar');
+  const allChk = document.getElementById('rec-select-all');
+  const total = document.querySelectorAll('.rec-bank-chk').length;
+  bar.style.display = ids.length ? 'flex' : 'none';
+  document.getElementById('rec-sel-count').textContent = `${ids.length} of ${total} selected`;
+  if (allChk) allChk.checked = total > 0 && ids.length === total;
+}
+
+async function doBulkAddToLedger() {
+  const ids = _recCheckedIds();
+  if (!ids.length) return;
+  const res = await fetch('/api/register/reconcile/bulk-add-to-ledger', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({bank_txn_ids: ids})
+  });
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+
+async function doBulkDelete() {
+  const ids = _recCheckedIds();
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} selected bank transaction(s)?`)) return;
+  await Promise.all(ids.map(id =>
+    fetch(`/api/register/transactions/${id}`, {method: 'DELETE'})
+  ));
+  await cfLoadTxns();
+  await renderReconcile();
 }
 
 async function doMarkReconciled(id) {

@@ -215,7 +215,10 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if cutoff_date:
         query = query.filter(Transaction.date >= cutoff_date)
     txns = query.all()
-    return _compute_running_balance(opening, txns)
+    result = _compute_running_balance(opening, txns)
+    result["cutoff_date"] = acct.cutoff_date.isoformat() if acct.cutoff_date else None
+    result["cutoff_balance"] = float(acct.cutoff_balance) if acct.cutoff_balance is not None else None
+    return result
 
 
 @router.post("/{account_id}/transactions", status_code=201)

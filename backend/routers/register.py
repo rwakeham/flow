@@ -200,11 +200,8 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    opening, cutoff_date = _effective_opening(acct)
-    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
-    if cutoff_date:
-        query = query.filter(Transaction.date >= cutoff_date)
-    txns = query.all()
+    opening, _ = _effective_opening(acct)
+    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
     return _compute_running_balance(opening, txns)
 
 
@@ -300,9 +297,6 @@ async def check_import(
         would_import = 0
         would_skip = 0
         for row in result.ledger_rows:
-            if cutoff_date and row.date < cutoff_date:
-                would_skip += 1
-                continue
             existing = db.execute(
                 text("""
                     SELECT id FROM transactions
@@ -443,9 +437,6 @@ def _import_ledger_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
     imported = 0
     skipped = 0
     for row in rows:
-        if cutoff_date and row.date < cutoff_date:
-            skipped += 1
-            continue
         existing = db.execute(
             text("""
                 SELECT id FROM transactions

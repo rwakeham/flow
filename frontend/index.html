@@ -1271,19 +1271,16 @@ function renderBankSubRow(t) {
 }
 
 function _rankManualForBank(bankTxn, manualList) {
-  // Sort manual options by relevance to this bank transaction:
-  // exact date+amount first, then by date proximity, then by amount proximity.
-  const bDate = new Date(bankTxn.date).getTime();
+  // Exact date+amount match floats to the top (pre-selected).
+  // Everything else stays in chronological order (ascending date).
   return [...(manualList || [])].sort((a, b) => {
-    const aDays = Math.abs(new Date(a.date).getTime() - bDate) / 86400000;
-    const bDays = Math.abs(new Date(b.date).getTime() - bDate) / 86400000;
-    const aAmt  = Math.abs(a.amount - bankTxn.amount);
-    const bAmt  = Math.abs(b.amount - bankTxn.amount);
-    const aExact = aDays === 0 && aAmt === 0;
-    const bExact = bDays === 0 && bAmt === 0;
+    const aExact = a.date === bankTxn.date && Math.abs(a.amount - bankTxn.amount) < 0.001;
+    const bExact = b.date === bankTxn.date && Math.abs(b.amount - bankTxn.amount) < 0.001;
     if (aExact !== bExact) return aExact ? -1 : 1;
-    // Sort by combined date+amount proximity
-    return (aDays + aAmt) - (bDays + bAmt);
+    // Otherwise chronological (ascending)
+    if (a.date < b.date) return -1;
+    if (a.date > b.date) return 1;
+    return 0;
   });
 }
 
@@ -1525,11 +1522,12 @@ async function renderReconcile() {
   } else {
     bankEl.innerHTML = data.unmatched_bank.map(t => {
       const sug = t.suggestion;
-      const sugHtml = sug ? `
+      const sugManual = sug ? data.unmatched_manual.find(m => m.id === sug.manual_id) : null;
+      const sugHtml = sugManual ? `
         <div class="rec-suggestion">
           <strong>Suggested:</strong>
-          ${escHtml(data.unmatched_manual.find(m => m.id === sug.manual_id)?.description || '?')}
-          (score ${(sug.score * 100).toFixed(0)}%)
+          ${cfFmtDate(sugManual.date)} — ${escHtml(sugManual.description)} (${fmtFull(sugManual.amount)})
+          &ensp;<span style="color:var(--text-muted)">${(sug.score * 100).toFixed(0)}% match</span>
           <button class="btn-sm btn-primary" onclick="doRecMatch(${t.id}, ${sug.manual_id})">✓ Match</button>
         </div>` : '';
       // Rank manual options by relevance to this bank transaction

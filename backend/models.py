@@ -38,6 +38,7 @@ class RegisterAccount(Base):
     notes = Column(String, nullable=True)
     cutoff_date = Column(Date, nullable=True)       # ignore transactions before this date
     cutoff_balance = Column(Numeric(18, 2), nullable=True)  # effective balance as of cutoff_date
+    is_default = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

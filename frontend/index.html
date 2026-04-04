@@ -807,42 +807,53 @@ function renderCards(s) {
 }
 
 // ── Derived series ────────────────────────────────────────────────────────────
-// Forward-fill values from sourcePeriods into targetPeriods.
-function _reindex(values, sourcePeriods, targetPeriods) {
-  const byPeriod = {};
-  sourcePeriods.forEach((p, i) => { byPeriod[p] = values[i]; });
+// Build YYYY-MM → value map from a set of periods+values (last value wins per month).
+function _monthMap(values, periods) {
+  const m = {};
+  periods.forEach((p, i) => { m[p.slice(0, 7)] = values[i]; });
+  return m;
+}
+// Forward-fill values for each month in targetMonths using a YYYY-MM value map.
+function _reindexByMonth(byMonth, targetMonths) {
   let last = null;
-  return targetPeriods.map(p => { if (p in byPeriod) last = byPeriod[p]; return last; });
+  return targetMonths.map(ym => { if (ym in byMonth) last = byMonth[ym]; return last; });
 }
 
 function deriveSeries() {
-  const accts = (tsData && tsData.accounts) ? tsData.accounts : [];
-  const tsPeriods = (tsData && tsData.periods) ? tsData.periods : [];
+  const accts     = (tsData && tsData.accounts) ? tsData.accounts : [];
+  const tsPeriods = (tsData && tsData.periods)  ? tsData.periods  : [];
 
-  // Merge regular and register account periods into a unified sorted list
-  const periods = [...new Set([...tsPeriods, ...regTsData.periods])].sort();
-  const n = periods.length;
+  // Collapse both sources to one representative period per calendar month.
+  // Within a month, prefer the regular-account period date (for stable labels);
+  // fall back to the register period if no regular period exists that month.
+  const tsMonths  = {};
+  tsPeriods.forEach(p => { const ym = p.slice(0,7); if (!tsMonths[ym] || p > tsMonths[ym]) tsMonths[ym] = p; });
+  const regMonths = {};
+  regTsData.periods.forEach(p => { const ym = p.slice(0,7); if (!regMonths[ym] || p > regMonths[ym]) regMonths[ym] = p; });
 
-  const ri = (a, src) => ({ ...a, values: _reindex(a.values, src, periods) });
+  const allMonths = [...new Set([...Object.keys(tsMonths), ...Object.keys(regMonths)])].sort();
+  const periods   = allMonths.map(ym => tsMonths[ym] || regMonths[ym]);
+  const n         = allMonths.length;
 
-  const assets  = accts.filter(a => a.account_type === 'asset'     && !a.ignored).map(a => ri(a, tsPeriods));
-  const liabs   = accts.filter(a => a.account_type === 'liability'  && !a.ignored).map(a => ri(a, tsPeriods));
-  const allAssets = accts.filter(a => a.account_type === 'asset').map(a => ri(a, tsPeriods));
-  const allLiabs  = accts.filter(a => a.account_type === 'liability').map(a => ri(a, tsPeriods));
+  const ri  = a => ({ ...a, values: _reindexByMonth(_monthMap(a.values, tsPeriods),      allMonths) });
+  const riR = a => ({ ...a, values: _reindexByMonth(_monthMap(a.values, regTsData.periods), allMonths) });
 
-  // Register accounts appear as non-ignored assets of type "cash"
+  const assets    = accts.filter(a => a.account_type === 'asset'     && !a.ignored).map(ri);
+  const liabs     = accts.filter(a => a.account_type === 'liability'  && !a.ignored).map(ri);
+  const allAssets = accts.filter(a => a.account_type === 'asset').map(ri);
+  const allLiabs  = accts.filter(a => a.account_type === 'liability').map(ri);
+
   const cashAssets = regTsData.accounts.map(a => ({
-    ...a, account_type: 'asset', cash: true, ignored: false,
-    values: _reindex(a.values, regTsData.periods, periods),
+    ...riR(a), account_type: 'asset', cash: true, ignored: false,
   }));
 
-  const allAssetsWithCash = [...assets, ...cashAssets];
+  const allAssetsWithCash = [...assets,    ...cashAssets];
   const allWithCash       = [...allAssets, ...cashAssets];
 
-  const totalAssets = periods.map((_, i) => allAssetsWithCash.reduce((s, a) => s + (a.values[i] ?? 0), 0));
-  const totalLiabs  = periods.map((_, i) => liabs.reduce((s, a) => s + (a.values[i] ?? 0), 0));
-  const netWorth    = periods.map((_, i) => totalAssets[i] + totalLiabs[i]);
-  const dta         = periods.map((_, i) => totalAssets[i] ? Math.abs(totalLiabs[i]) / totalAssets[i] * 100 : 0);
+  const totalAssets = allMonths.map((_, i) => allAssetsWithCash.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+  const totalLiabs  = allMonths.map((_, i) => liabs.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+  const netWorth    = allMonths.map((_, i) => totalAssets[i] + totalLiabs[i]);
+  const dta         = allMonths.map((_, i) => totalAssets[i] ? Math.abs(totalLiabs[i]) / totalAssets[i] * 100 : 0);
 
   return { assets: allAssetsWithCash, liabs, allAssets: allWithCash, allLiabs, totalAssets, totalLiabs, netWorth, dta, n, periods };
 }

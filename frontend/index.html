@@ -483,6 +483,7 @@ button:hover { background: var(--surface2); }
     <button onclick="openAddRAcct()">+ New Account</button>
     <button onclick="openImportBank()" id="cf-import-btn" style="display:none">↑ Import</button>
     <button onclick="toggleReconcile()" id="cf-reconcile-btn" style="display:none">⇄ Reconcile</button>
+    <button onclick="cfToggleBankSubs()" id="cf-banksubs-btn" style="display:none">⇌ Hide matched</button>
     <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
     <button onclick="openMgmtAcct()" id="cf-manage-btn" style="display:none">⚙ Manage</button>
     <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
@@ -981,6 +982,7 @@ let cfFilterText = '';
 let cfFilterRec  = 'all';   // 'all' | 'reconciled' | 'unreconciled'
 let cfPage     = 1;
 const CF_PER_PAGE = 50;
+let cfShowBankSubs = true;  // show/hide matched bank sub-rows
 
 // ── Section switching ─────────────────────────────────────────────────────────
 function showSection(section) {
@@ -1035,10 +1037,17 @@ function cfSelectAccount(val) {
   else { cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0}; renderRegister(); }
 }
 
+function cfToggleBankSubs() {
+  cfShowBankSubs = !cfShowBankSubs;
+  document.getElementById('cf-banksubs-btn').textContent = cfShowBankSubs ? '⇌ Hide matched' : '⇌ Show matched';
+  renderRegister();
+}
+
 function cfUpdateToolbar() {
   const has = !!cfCurrentId;
   document.getElementById('cf-import-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-banksubs-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-manage-btn').style.display = has ? '' : 'none';
   if (has) {
@@ -1371,10 +1380,12 @@ function renderManualRow(t) {
 }
 
 function renderBankSubRow(t) {
+  if (!cfShowBankSubs) return '';
   return `<tr class="row-bank-sub" data-id="${t.id}">
-    <td colspan="5" style="padding-left:28px">
+    <td colspan="4" style="padding-left:28px">
       <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>
     </td>
+    <td class="num"><span class="balance-cell" style="color:var(--text-muted);font-size:11px" title="Bank confirmed">${t.balance !== undefined ? fmtFull(t.balance) : ''}</span></td>
     <td><span class="rec-check">✓</span></td>
     <td><button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button></td>
   </tr>`;
@@ -1436,7 +1447,7 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
     </td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
-    <td></td>
+    <td class="num"><span class="balance-cell balance-forecast" title="Projected balance (unmatched bank transaction)">${t.balance !== undefined ? fmtFull(t.balance) : ''}</span></td>
     <td><span class="rec-none">?</span></td>
     <td><button class="btn-sm" onclick="doDeleteTxn(${t.id})" style="color:var(--red)" title="Delete">✕</button></td>
   </tr>`;

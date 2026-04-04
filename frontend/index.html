@@ -152,8 +152,10 @@ button:hover { background: var(--surface2); }
 .badge { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 600; letter-spacing: 0.04em; }
 .badge-asset { background: #dcfce7; color: #15803d; }
 .badge-liability { background: #fee2e2; color: #b91c1c; }
+.badge-register { background: #dbeafe; color: #1d4ed8; }
 [data-theme="dark"] .badge-asset { background: #14532d; color: #86efac; }
 [data-theme="dark"] .badge-liability { background: #7f1d1d; color: #fca5a5; }
+[data-theme="dark"] .badge-register { background: #1e3a5f; color: #93c5fd; }
 .acct-row select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 12px; }
 .acct-row.ignored { opacity: 0.45; }
 .ignore-btn { padding: 3px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
@@ -427,9 +429,10 @@ button:hover { background: var(--surface2); }
       <option value="">— select account —</option>
     </select>
     <button onclick="openAddRAcct()">+ New Account</button>
-    <button onclick="openImportBank()" id="cf-import-btn" style="display:none">↑ Import Bank CSV</button>
+    <button onclick="openImportBank()" id="cf-import-btn" style="display:none">↑ Import</button>
     <button onclick="toggleReconcile()" id="cf-reconcile-btn" style="display:none">⇄ Reconcile</button>
     <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
+    <button onclick="doDeleteRAcct()" id="cf-delete-acct-btn" style="display:none;color:var(--red)">Delete Account</button>
     <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
   </div>
 
@@ -608,8 +611,14 @@ async function patchIgnore(id, ignored) {
 }
 function renderAccounts() {
   const el = document.getElementById('acct-list');
-  if (!accounts.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No accounts yet. Import a file to get started.</div>'; return; }
-  el.innerHTML = accounts.map(a => `
+  let html = '';
+
+  if (!accounts.length && !cfAccounts.length) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No accounts yet. Import a file to get started.</div>';
+    return;
+  }
+
+  html += accounts.map(a => `
     <div class="acct-row${a.ignored ? ' ignored' : ''}">
       <span class="acct-name">${a.name}</span>
       ${!a.ignored ? `<span class="badge badge-${a.account_type}">${a.account_type}</span>` : ''}
@@ -620,6 +629,19 @@ function renderAccounts() {
       </select>` : ''}
       <button class="ignore-btn${a.ignored ? ' active' : ''}" onclick="patchIgnore(${a.id}, ${!a.ignored})">${a.ignored ? 'ignored' : 'ignore'}</button>
     </div>`).join('');
+
+  if (cfAccounts.length) {
+    if (accounts.length) html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+    html += cfAccounts.map(a => `
+      <div class="acct-row">
+        <span class="acct-name">${a.name}</span>
+        <span class="badge badge-register">register</span>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:auto">${fmtFull(a.current_balance)}</span>
+        <button onclick="showSection('cashflow')" style="font-size:11px;padding:3px 8px">Open →</button>
+      </div>`).join('');
+  }
+
+  el.innerHTML = html;
 }
 
 // ── Chart helpers ─────────────────────────────────────────────────────────────
@@ -639,10 +661,11 @@ function baseOpts(yFmt) {
 
 // ── Load everything ───────────────────────────────────────────────────────────
 async function loadAll() {
-  const [sumRes, tsRes, acctRes] = await Promise.all([
+  const [sumRes, tsRes, acctRes, regRes] = await Promise.all([
     fetch('/api/data/summary'),
     fetch('/api/data/timeseries'),
     fetch('/api/accounts'),
+    fetch('/api/register/accounts'),
   ]);
   if (sumRes.status === 401 || tsRes.status === 401) {
     document.getElementById('app').classList.add('hidden');
@@ -652,6 +675,7 @@ async function loadAll() {
   const sum  = await sumRes.json();
   tsData     = await tsRes.json();
   accounts   = await acctRes.json();
+  cfAccounts = regRes.ok ? await regRes.json() : [];
 
   renderCards(sum);
   renderAccounts();
@@ -670,17 +694,17 @@ function setCard(valId, deltaId, value, delta, invertGood) {
   }
 }
 function renderCards(s) {
-  setCard('c-nw', 'c-nw-d', s.net_worth, s.net_worth_mom_delta, false);
-  setCard('c-assets', 'c-assets-d', s.total_assets, null, false);
+  // Add register account balances to total assets / net worth
+  const regTotal = cfAccounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
+  const totalAssets = s.total_assets + regTotal;
+  const netWorth = s.net_worth + regTotal;
+
+  setCard('c-nw', 'c-nw-d', netWorth, s.net_worth_mom_delta, false);
+  setCard('c-assets', 'c-assets-d', totalAssets, null, false);
   setCard('c-liab', 'c-liab-d', Math.abs(s.total_liabilities), null, false);
   if (s.largest_asset) {
     document.getElementById('c-top-label').textContent = s.largest_asset.name;
     setCard('c-top', 'c-top-d', s.largest_asset.value, s.largest_asset.mom_delta, false);
-  }
-  // Liability delta label
-  const liabDelta = document.getElementById('c-liab-d');
-  if (s.net_worth_mom_delta !== null) {
-    const prevLiab = s.total_liabilities; // directional hint not available in summary; skip
   }
 }
 
@@ -943,10 +967,31 @@ function cfUpdateToolbar() {
   document.getElementById('cf-import-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-delete-acct-btn').style.display = has ? '' : 'none';
   const acct = cfAccounts.find(a => a.id === cfCurrentId);
   document.getElementById('cf-balance-summary').textContent = acct
     ? 'Balance: ' + fmtFull(acct.current_balance)
     : '';
+}
+
+async function doDeleteRAcct() {
+  const acct = cfAccounts.find(a => a.id === cfCurrentId);
+  if (!acct) return;
+  if (!confirm(`Delete "${acct.name}" and all its transactions? This cannot be undone.`)) return;
+  const res = await fetch(`/api/register/accounts/${cfCurrentId}`, {method: 'DELETE'});
+  if (res.ok || res.status === 204) {
+    cfCurrentId = null;
+    cfTxns = [];
+    if (cfReconciling) { cfReconciling = false; document.getElementById('register-view').classList.remove('hidden'); document.getElementById('reconcile-view').classList.remove('active'); }
+    await cfLoadAccounts();
+    // Also refresh dashboard account list
+    const acctRes = await fetch('/api/accounts');
+    if (acctRes.ok) accounts = await acctRes.json();
+    renderAccounts();
+    document.getElementById('cf-account-select').value = '';
+    renderRegister();
+    cfUpdateToolbar();
+  }
 }
 
 // ── Add Register Account ──────────────────────────────────────────────────────

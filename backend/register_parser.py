@@ -10,13 +10,17 @@ Parser for two supported import formats:
        Date\tDescription\tCredit\tDebit\tReconciled\tBalance\t...
    Column 1 is a text description → detected as ledger format.
    Credit column: '$2,478.30' or empty.
-   Debit column:  '$(3,099.54)' (accounting negative) or empty.
+   Debit column:  '$(3,099.54)' or '($3,099.54)' (accounting negative) or empty.
    Reconciled column: 'X' or empty.
    Returns LedgerRow objects (source='manual').
+
+Auto-detects delimiter (tab or comma/CSV), strips BOM, handles quoted fields.
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -53,10 +57,7 @@ class ParseResult:
 
 
 def parse_bank_export(content: bytes) -> list[BankRow]:
-    """
-    Backwards-compatible helper: parse a bank export and return BankRow list.
-    Raises ValueError if the file is not in bank format.
-    """
+    """Backwards-compatible helper: parse a bank export and return BankRow list."""
     result = parse_register_import(content)
     if result.format == FileFormat.LEDGER:
         raise ValueError("File appears to be a ledger export, not a bank export")
@@ -65,175 +66,214 @@ def parse_bank_export(content: bytes) -> list[BankRow]:
 
 def parse_register_import(content: bytes) -> ParseResult:
     """
-    Auto-detect format and parse both bank and ledger exports.
+    Auto-detect format and delimiter, then parse both bank and ledger exports.
     Returns a ParseResult with format indicator and the appropriate row list populated.
     """
-    text = content.decode("utf-8", errors="replace")
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    text = _decode(content)
+    rows = _parse_to_rows(text)   # list[list[str]] — all non-empty rows as field lists
 
-    if not lines:
+    if not rows:
         return ParseResult(format=FileFormat.UNKNOWN, bank_rows=[], ledger_rows=[])
 
-    # Detect format from first parseable line
-    detected = _detect_format(lines)
+    fmt = _detect_format(rows)
 
-    if detected == FileFormat.BANK:
-        rows = _parse_bank_lines(lines)
-        return ParseResult(format=FileFormat.BANK, bank_rows=rows, ledger_rows=[])
-    elif detected == FileFormat.LEDGER:
-        rows = _parse_ledger_lines(lines)
-        return ParseResult(format=FileFormat.LEDGER, bank_rows=[], ledger_rows=rows)
+    if fmt == FileFormat.BANK:
+        return ParseResult(format=FileFormat.BANK, bank_rows=_build_bank_rows(rows), ledger_rows=[])
+    elif fmt == FileFormat.LEDGER:
+        return ParseResult(format=FileFormat.LEDGER, bank_rows=[], ledger_rows=_build_ledger_rows(rows))
     else:
         return ParseResult(format=FileFormat.UNKNOWN, bank_rows=[], ledger_rows=[])
 
 
-def _split_line(line: str) -> list[str]:
-    if "\t" in line:
-        return line.split("\t")
-    return re.split(r"\s{2,}", line)
+# ── Decoding & splitting ───────────────────────────────────────────────────────
+
+def _decode(content: bytes) -> str:
+    # Strip UTF-8 BOM if present, then decode
+    if content.startswith(b"\xef\xbb\xbf"):
+        content = content[3:]
+    # Try UTF-8 first, then Latin-1 as fallback
+    for enc in ("utf-8", "latin-1"):
+        try:
+            return content.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return content.decode("utf-8", errors="replace")
 
 
-def _detect_format(lines: list[str]) -> FileFormat:
+def _parse_to_rows(text: str) -> list[list[str]]:
     """
-    Examine the first few parseable lines to determine file format.
-    Bank format: col 0 = date, col 1 = numeric amount.
-    Ledger format: col 0 = date, col 1 = text description.
+    Split text into rows of fields. Auto-detects tab vs comma delimiter.
+    Filters out completely empty rows. Strips whitespace from each field.
     """
-    for line in lines[:5]:
-        parts = _split_line(line)
-        if len(parts) < 2:
+    lines = text.splitlines()
+    if not lines:
+        return []
+
+    # Detect delimiter: use tab if any line contains a tab, else try CSV
+    has_tabs = any("\t" in line for line in lines[:20])
+
+    rows: list[list[str]] = []
+    if has_tabs:
+        for line in lines:
+            if not line.strip():
+                continue
+            fields = [f.strip() for f in line.split("\t")]
+            if any(f for f in fields):  # at least one non-empty field
+                rows.append(fields)
+    else:
+        # CSV mode — use the csv module to handle quoted fields correctly
+        reader = csv.reader(io.StringIO(text))
+        for fields in reader:
+            stripped = [f.strip() for f in fields]
+            if any(f for f in stripped):
+                rows.append(stripped)
+
+    return rows
+
+
+# ── Format detection ──────────────────────────────────────────────────────────
+
+def _detect_format(rows: list[list[str]]) -> FileFormat:
+    """
+    Scan up to the first 20 rows with a parseable date to determine format:
+    - Bank:   col 0 = date, col 1 = numeric amount
+    - Ledger: col 0 = date, col 1 = text description
+    """
+    checked = 0
+    for fields in rows:
+        if not fields or len(fields) < 2:
             continue
         try:
-            _parse_date(parts[0].strip())
+            _parse_date(fields[0])
         except ValueError:
-            continue  # not a date row, skip
+            continue  # header or non-date row
 
-        col1 = parts[1].strip().replace(",", "")
+        checked += 1
+        col1 = fields[1].replace(",", "").replace("$", "").strip()
+        if not col1:
+            # Empty description — can't determine from this row alone
+            if checked >= 20:
+                break
+            continue
         try:
             float(col1)
             return FileFormat.BANK
         except ValueError:
-            # col1 is text — ledger format
-            if col1:  # non-empty text description
-                return FileFormat.LEDGER
+            return FileFormat.LEDGER
+
+        if checked >= 20:
+            break
 
     return FileFormat.UNKNOWN
 
 
 # ── Bank format ───────────────────────────────────────────────────────────────
 
-def _parse_bank_lines(lines: list[str]) -> list[BankRow]:
-    rows: list[BankRow] = []
-    for line in lines:
-        parts = _split_line(line)
-        if len(parts) < 2:
+def _build_bank_rows(rows: list[list[str]]) -> list[BankRow]:
+    result: list[BankRow] = []
+    for fields in rows:
+        if len(fields) < 2:
             continue
-
         try:
-            txn_date = _parse_date(parts[0].strip())
+            txn_date = _parse_date(fields[0])
         except ValueError:
             continue
-
-        amount_str = parts[1].strip().replace(",", "")
         try:
-            amount = float(amount_str)
+            amount = float(fields[1].replace(",", ""))
         except ValueError:
             continue
 
         check_number: str | None = None
-        if len(parts) >= 4:
-            ck = parts[3].strip()
+        if len(fields) >= 4:
+            ck = fields[3]
             if ck:
                 check_number = ck
 
-        if len(parts) >= 5:
-            description = "\t".join(parts[4:]).strip()
-        elif len(parts) == 4:
-            if check_number and not check_number.isdigit():
-                description = check_number
-                check_number = None
-            else:
-                description = ""
+        if len(fields) >= 5:
+            description = " ".join(fields[4:]).strip()
+        elif len(fields) == 4 and check_number and not check_number.isdigit():
+            description = check_number
+            check_number = None
         else:
             description = ""
 
-        rows.append(BankRow(
+        result.append(BankRow(
             date=txn_date,
             amount=amount,
             bank_description=description,
             check_number=check_number,
         ))
-    return rows
+    return result
 
 
 # ── Ledger format ─────────────────────────────────────────────────────────────
 
-def _parse_ledger_lines(lines: list[str]) -> list[LedgerRow]:
+def _build_ledger_rows(rows: list[list[str]]) -> list[LedgerRow]:
     """
-    Parse the user's manual ledger spreadsheet format:
-        Date  Description  Credit  Debit  ReconcileFlag  Balance  ReconcileBalance
-    Credit and Debit are mutually exclusive per row.
-    Amounts use accounting notation: $(3,099.54) for negatives.
+    Parse the user's manual ledger spreadsheet:
+        Date  Description  Credit  Debit  ReconcileFlag  Balance  ...
+
+    Rows with no credit AND no debit (e.g. opening balance markers, blank filler
+    rows, and future placeholder rows) are skipped — they carry no transaction.
+    Rows with no date are also skipped.
     """
-    rows: list[LedgerRow] = []
-    for line in lines:
-        parts = _split_line(line)
-        if len(parts) < 2:
+    result: list[LedgerRow] = []
+    for fields in rows:
+        if len(fields) < 2:
             continue
 
+        # Skip rows with no date
         try:
-            txn_date = _parse_date(parts[0].strip())
+            txn_date = _parse_date(fields[0])
         except ValueError:
             continue
 
-        description = parts[1].strip()
+        description = fields[1] if len(fields) > 1 else ""
         if not description:
             continue
 
-        # Credit (col 2) and Debit (col 3)
-        credit_str = parts[2].strip() if len(parts) > 2 else ""
-        debit_str  = parts[3].strip() if len(parts) > 3 else ""
+        credit_str = fields[2] if len(fields) > 2 else ""
+        debit_str  = fields[3] if len(fields) > 3 else ""
 
         credit = _parse_accounting_amount(credit_str)
         debit  = _parse_accounting_amount(debit_str)
 
-        if credit is None and debit is None:
-            continue  # no usable amount
-
-        # Credit is positive, debit is negative (debit values are stored as positive
-        # in the accounting format $(X), we negate them here)
-        if credit is not None and credit != 0:
-            amount = credit
-        elif debit is not None and debit != 0:
-            amount = -abs(debit)
-        else:
+        # Skip rows with no usable amount (balance markers, placeholders)
+        if (credit is None or credit == 0) and (debit is None or debit == 0):
             continue
 
-        # Reconciled flag (col 4): 'X' or 'x' means reconciled
-        rec_str = parts[4].strip() if len(parts) > 4 else ""
+        if credit is not None and credit != 0:
+            amount = credit           # positive = money in
+        else:
+            amount = -abs(debit)      # negative = money out
+
+        # Reconciled flag: col 4, 'X' or 'x'
+        rec_str = fields[4].strip() if len(fields) > 4 else ""
         is_reconciled = rec_str.upper() == "X"
 
-        rows.append(LedgerRow(
+        result.append(LedgerRow(
             date=txn_date,
             description=description,
             amount=amount,
             is_reconciled=is_reconciled,
         ))
-    return rows
+    return result
 
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_accounting_amount(s: str) -> float | None:
     """
     Parse dollar amounts in accounting notation:
       '$2,478.30'    →  2478.30
       '$(3,099.54)'  →  3099.54  (caller negates if this is a debit)
+      '($3,099.54)'  →  3099.54
       ''             →  None
     """
     s = s.strip()
     if not s:
         return None
-    # Remove $, spaces, commas, and accounting parens
-    cleaned = s.replace("$", "").replace(",", "").replace("(", "").replace(")", "").strip()
+    cleaned = re.sub(r"[$,()\s]", "", s).strip()
     if not cleaned:
         return None
     try:
@@ -244,6 +284,7 @@ def _parse_accounting_amount(s: str) -> float | None:
 
 def _parse_date(s: str) -> date:
     """Parse M/D/YY or M/D/YYYY date strings."""
+    s = s.strip()
     for fmt in ("%m/%d/%y", "%m/%d/%Y"):
         try:
             return datetime.strptime(s, fmt).date()

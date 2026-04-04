@@ -289,8 +289,8 @@ button:hover { background: var(--surface2); }
 <!-- Import Bank CSV modal -->
 <div id="import-bank-modal" class="hidden">
   <div class="modal-box">
-    <h2>Import Bank Export</h2>
-    <p>Upload your bank's tab-separated export file. Duplicate transactions will be skipped automatically.</p>
+    <h2>Import Transactions</h2>
+    <p>Upload a bank export <em>or</em> your existing ledger spreadsheet (tab-separated). Format is detected automatically. Duplicates are skipped.</p>
     <input type="file" id="bank-import-file" accept=".csv,.tsv,.txt">
     <div id="bank-import-result" style="font-size:13px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm);display:none"></div>
     <div class="modal-footer">
@@ -1206,8 +1206,12 @@ async function doImportBank() {
   if (res.ok) {
     const d = await res.json();
     r.style.color = 'var(--green)';
-    r.innerHTML = `✓ Imported ${d.imported} transactions. Auto-matched: ${d.auto_matched}. Unmatched: ${d.unmatched}.`
-      + (d.unmatched > 0 ? ' <a href="#" onclick="closeImportBank();toggleReconcile();return false" style="color:var(--accent)">Reconcile now →</a>' : '');
+    if (d.format === 'ledger') {
+      r.innerHTML = `✓ Ledger import: ${d.imported} transactions added${d.skipped ? `, ${d.skipped} duplicates skipped` : ''}.`;
+    } else {
+      r.innerHTML = `✓ Bank import: ${d.imported} transactions. Auto-matched: ${d.auto_matched}. Unmatched: ${d.unmatched}.`
+        + (d.unmatched > 0 ? ' <a href="#" onclick="closeImportBank();toggleReconcile();return false" style="color:var(--accent)">Reconcile now →</a>' : '');
+    }
     await cfLoadTxns();
   } else {
     const d = await res.json().catch(() => ({detail:'Import failed'}));

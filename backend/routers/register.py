@@ -17,7 +17,7 @@ from auth import require_auth
 from database import get_db
 from models import RegisterAccount, Transaction
 from reconciler import TxnInfo, suggest_matches
-from register_parser import parse_bank_export
+from register_parser import FileFormat, parse_register_import
 
 router = APIRouter(prefix="/api/register", dependencies=[Depends(require_auth)])
 
@@ -210,14 +210,20 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-# ── Bank Import ────────────────────────────────────────────────────────────────
+# ── Import (bank export or manual ledger spreadsheet) ─────────────────────────
 
 @router.post("/{account_id}/import")
-async def import_bank_csv(
+async def import_csv(
     account_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    """
+    Auto-detects file format:
+    - Bank export (col 1 = numeric amount)  → imported as source='bank', runs auto-matching
+    - Ledger spreadsheet (col 1 = description) → imported as source='manual', reconciled
+      flag preserved; used to seed the ledger from an existing tracking spreadsheet
+    """
     acct = db.get(RegisterAccount, account_id)
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -227,17 +233,74 @@ async def import_bank_csv(
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
 
     try:
-        bank_rows = parse_bank_export(content)
+        result = parse_register_import(content)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
 
-    if not bank_rows:
+    if result.format == FileFormat.UNKNOWN:
         raise HTTPException(status_code=422, detail="No transactions found in file")
 
-    # Insert bank rows, skipping exact duplicates (same account + date + amount + bank_description)
+    if result.format == FileFormat.LEDGER:
+        return _import_ledger_rows(result.ledger_rows, account_id, db)
+    else:
+        return _import_bank_rows(result.bank_rows, account_id, db)
+
+
+def _import_ledger_rows(rows, account_id: int, db) -> dict:
+    """
+    Import rows from the user's manual tracking spreadsheet as manual transactions.
+    Already-reconciled entries (X flag) are marked is_reconciled=True.
+    Duplicates (same date + amount + description) are skipped.
+    No auto-matching is run — these ARE the ledger.
+    """
+    imported = 0
+    skipped = 0
+    for row in rows:
+        existing = db.execute(
+            text("""
+                SELECT id FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'manual'
+                  AND date = :dt
+                  AND amount = :amt
+                  AND description = :desc
+                LIMIT 1
+            """),
+            {"aid": account_id, "dt": row.date, "amt": row.amount, "desc": row.description},
+        ).fetchone()
+        if existing:
+            skipped += 1
+            continue
+
+        txn = Transaction(
+            register_account_id=account_id,
+            date=row.date,
+            description=row.description,
+            amount=row.amount,
+            source="manual",
+            is_reconciled=row.is_reconciled,
+        )
+        db.add(txn)
+        imported += 1
+
+    db.commit()
+    return {
+        "format": "ledger",
+        "imported": imported,
+        "skipped": skipped,
+        "auto_matched": 0,
+        "unmatched": 0,
+    }
+
+
+def _import_bank_rows(rows, account_id: int, db) -> dict:
+    """
+    Import rows from a bank export as bank transactions, then run auto-matching
+    against any existing unmatched manual transactions.
+    """
     imported = 0
     new_bank_txns: list[Transaction] = []
-    for row in bank_rows:
+    for row in rows:
         existing = db.execute(
             text("""
                 SELECT id FROM transactions
@@ -248,15 +311,10 @@ async def import_bank_csv(
                   AND bank_description = :desc
                 LIMIT 1
             """),
-            {
-                "aid": account_id,
-                "dt": row.date,
-                "amt": row.amount,
-                "desc": row.bank_description,
-            },
+            {"aid": account_id, "dt": row.date, "amt": row.amount, "desc": row.bank_description},
         ).fetchone()
         if existing:
-            continue  # skip duplicate
+            continue
 
         txn = Transaction(
             register_account_id=account_id,
@@ -274,9 +332,9 @@ async def import_bank_csv(
 
     if not new_bank_txns:
         db.commit()
-        return {"imported": 0, "auto_matched": 0, "unmatched": 0}
+        return {"format": "bank", "imported": 0, "auto_matched": 0, "unmatched": 0}
 
-    # Run auto-matching against existing unmatched manual transactions
+    # Auto-match against existing unmatched manual transactions
     unmatched_manual = (
         db.query(Transaction)
         .filter(
@@ -299,7 +357,6 @@ async def import_bank_csv(
 
     suggestions = suggest_matches(bank_infos, manual_infos)
 
-    # Auto-apply matches (each manual can only be used once)
     used_manual_ids: set[int] = set()
     auto_matched = 0
     for suggestion in sorted(suggestions, key=lambda s: -s.score):
@@ -316,9 +373,8 @@ async def import_bank_csv(
             auto_matched += 1
 
     db.commit()
-
     unmatched = imported - auto_matched
-    return {"imported": imported, "auto_matched": auto_matched, "unmatched": unmatched}
+    return {"format": "bank", "imported": imported, "auto_matched": auto_matched, "unmatched": unmatched}
 
 
 # ── Reconciliation ─────────────────────────────────────────────────────────────

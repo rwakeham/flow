@@ -237,10 +237,8 @@ button:hover { background: var(--surface2); }
 .balance-forecast::before { content: '~'; font-size: 10px; }
 .cutoff-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; color: var(--text-muted); padding: 6px 10px; }
 .cutoff-row .cutoff-bal { font-weight: 700; color: var(--text); font-size: 13px; }
-.date-balance-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; padding: 6px 10px; }
-.date-balance-amt { font-weight: 700; font-size: 13px; color: var(--text); }
-.date-balance-verified { }
-.date-balance-forecast { font-style: italic; }
+.bal-col { font-weight: 600; color: var(--text); }
+.bal-forecast { font-style: italic; font-weight: 400; color: var(--text-muted); }
 .today-marker-row td { background: color-mix(in srgb, var(--accent) 12%, var(--surface2)); border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); font-size: 12px; padding: 6px 10px; color: var(--accent); }
 /* ── Pagination ── */
 .reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
@@ -530,14 +528,16 @@ button:hover { background: var(--surface2); }
           <tr id="reg-thead-row">
             <th style="width:100px">Date</th>
             <th>Description</th>
-            <th class="num" style="width:120px">Credit</th>
-            <th class="num" style="width:120px">Debit</th>
+            <th class="num" style="width:110px">Credit</th>
+            <th class="num" style="width:110px">Debit</th>
+            <th class="num" style="width:120px">Balance</th>
             <th style="width:40px">✓</th>
             <th style="width:80px"></th>
           </tr>
         </thead>
         <tbody id="register-tbody">
           <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>
+
         </tbody>
         <tfoot id="register-tfoot"></tfoot>
       </table>
@@ -1407,7 +1407,7 @@ function renderRegister() {
   const tfoot = document.getElementById('register-tfoot');
   if (!cfCurrentId) {
     filterBar.style.display = 'none'; pagination.style.display = 'none';
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
     tfoot.innerHTML = '';
     return;
   }
@@ -1415,7 +1415,7 @@ function renderRegister() {
 
   if (!cfAllTxns.length) {
     pagination.style.display = 'none';
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
     return;
   }
 
@@ -1454,37 +1454,23 @@ function renderRegister() {
     paginationTop.style.display = 'none';
   }
 
-  // Build end-of-day balance map from cfAllTxns (backend ascending order).
-  const endOfDayBal = {};
-  for (const t of cfAllTxns) {
-    if (t.balance !== undefined) endOfDayBal[t.date] = t.balance;
-  }
-
   const unmatchedManual = cfAllTxns.filter(t => t.source === 'manual' && !t.matched_to_id && !t.is_reconciled);
 
-  // Compute today's balance for the "today" marker row.
-  // Find the latest date in endOfDayBal that is <= today, then use that balance.
+  // Compute today's balance for the "today" marker row: latest balance on or before today.
   const todayStr = todayIso();
-  const balDates = Object.keys(endOfDayBal).sort();
   let todayBalance = null;
-  for (const d of balDates) {
-    if (d <= todayStr) todayBalance = endOfDayBal[d];
+  for (const t of cfAllTxns) {
+    if (t.balance !== undefined && t.date <= todayStr) todayBalance = t.balance;
   }
 
-  // Sorted date-desc: balance row appears BEFORE each date group (shows the day total above its transactions)
+  // Sorted date-desc; inject "today" marker when we cross from future into past
   let html = '';
-  let prevDate = null;
   let todayInserted = false;
   for (const g of pageGroups) {
     const date = g.primary.date;
-    // Insert "today" marker row when we cross from future into past (on the last page showing it)
     if (!todayInserted && date < todayStr) {
       if (todayBalance !== null) html += renderTodayRow(todayStr, todayBalance);
       todayInserted = true;
-    }
-    if (date !== prevDate) {
-      if (endOfDayBal[date] !== undefined) html += renderDateBalanceRow(date, endOfDayBal[date]);
-      prevDate = date;
     }
     if (g.isBank) {
       html += renderBankUnmatchedRow(g.primary, unmatchedManual);
@@ -1493,7 +1479,6 @@ function renderRegister() {
       if (g.bank) html += renderBankSubRow(g.bank);
     }
   }
-  // If all transactions on this page are future (or there are none past today yet), append at bottom
   if (!todayInserted && todayBalance !== null) {
     html += renderTodayRow(todayStr, todayBalance);
   }
@@ -1503,8 +1488,9 @@ function renderRegister() {
   if (cfBalances.cutoff_date && cfBalances.cutoff_balance != null) {
     tfoot.innerHTML = `<tr class="cutoff-row">
       <td>${cfFmtDate(cfBalances.cutoff_date)}</td>
-      <td colspan="2" style="font-style:italic">Balance override — transactions before this date are hidden</td>
-      <td colspan="2" class="num"><span class="cutoff-bal">${fmtFull(cfBalances.cutoff_balance)}</span></td>
+      <td colspan="3" style="font-style:italic">Balance override — transactions before this date are hidden</td>
+      <td class="num"><span class="cutoff-bal">${fmtFull(cfBalances.cutoff_balance)}</span></td>
+      <td></td>
       <td></td>
     </tr>`;
   } else {
@@ -1512,25 +1498,11 @@ function renderRegister() {
   }
 }
 
-function renderDateBalanceRow(date, balance) {
-  const dayTxns = cfAllTxns.filter(t => t.date === date && t.source === 'manual');
-  const allReconciled = dayTxns.length > 0 && dayTxns.every(t => t.is_reconciled);
-  const balCls = allReconciled ? 'date-balance-verified' : 'date-balance-forecast';
-  // Use one td per column (no colspan) so border-collapse renders the top border evenly
-  return `<tr class="date-balance-row">
-    <td>${cfFmtDate(date)}</td>
-    <td style="font-style:italic;font-size:12px;color:var(--text-muted)">Balance</td>
-    <td></td>
-    <td class="num date-balance-amt ${balCls}">${fmtFull(balance)}</td>
-    <td></td>
-    <td></td>
-  </tr>`;
-}
-
 function renderTodayRow(date, balance) {
   return `<tr class="today-marker-row">
     <td style="font-weight:600;white-space:nowrap">${cfFmtDate(date)}</td>
     <td style="font-weight:600;font-size:12px">Today</td>
+    <td></td>
     <td></td>
     <td class="num" style="font-weight:700">${fmtFull(balance)}</td>
     <td></td>
@@ -1546,11 +1518,14 @@ function renderManualRow(t) {
   const dupeBtn    = !t.bank_description
     ? `<button class="btn-sm" onclick="openDupeTxn(${t.id})" title="Duplicate">⧉</button>` : '';
   const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
+  const balCls = t.is_reconciled ? '' : 'bal-forecast';
+  const balStr = t.balance !== undefined ? fmtFull(t.balance) : '';
   return `<tr class="row-manual" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>
     <td>${escHtml(t.description)}${t.notes ? `<br><span class="bank-desc">${escHtml(t.notes)}</span>` : ''}</td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
+    <td class="num bal-col ${balCls}">${balStr}</td>
     <td>${recIcon}</td>
     <td><div class="row-actions">${editBtn}${dupeBtn}${delBtn}</div></td>
   </tr>`;
@@ -1559,7 +1534,7 @@ function renderManualRow(t) {
 function renderBankSubRow(t) {
   if (!cfShowBankSubs) return '';
   return `<tr class="row-bank-sub" data-id="${t.id}">
-    <td colspan="3" style="padding-left:28px">
+    <td colspan="4" style="padding-left:28px">
       <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>
     </td>
     <td></td>
@@ -1610,6 +1585,7 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
     : usedFallback ? 'Find Match… (no entries within ±14 days)'
     : 'Find Match…';
   const safeDesc = JSON.stringify(t.bank_description || t.description).replace(/"/g, '&quot;');
+  const balStr = t.balance !== undefined ? fmtFull(t.balance) : '';
   return `<tr class="row-bank-unmatched" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>
     <td>
@@ -1624,6 +1600,7 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
     </td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
+    <td class="num bal-col bal-forecast">${balStr}</td>
     <td><span class="rec-none">?</span></td>
     <td><button class="btn-sm" onclick="doDeleteTxn(${t.id})" style="color:var(--red)" title="Delete">✕</button></td>
   </tr>`;

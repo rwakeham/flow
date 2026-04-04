@@ -295,7 +295,8 @@ button:hover { background: var(--surface2); }
     <label style="font-size:12px;color:var(--text-muted)">Date</label>
     <input type="date" id="txn-date" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
     <label style="font-size:12px;color:var(--text-muted)">Description</label>
-    <input type="text" id="txn-desc" placeholder="Description" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <input type="text" id="txn-desc" list="txn-desc-list" autocomplete="off" placeholder="Description" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <datalist id="txn-desc-list"></datalist>
     <label style="font-size:12px;color:var(--text-muted)">Amount <span style="font-weight:400">(negative = debit/out, positive = credit/in)</span></label>
     <input type="text" id="txn-amount" placeholder="-1234.56 or 1234.56" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
     <label style="font-size:12px;color:var(--text-muted)">Notes (optional)</label>
@@ -489,7 +490,7 @@ button:hover { background: var(--surface2); }
     <button onclick="openAddRAcct()">+ New Account</button>
     <button onclick="openImportBank()" id="cf-import-btn" style="display:none">↑ Import</button>
     <button onclick="toggleReconcile()" id="cf-reconcile-btn" style="display:none">⇄ Reconcile</button>
-    <button onclick="cfToggleBankSubs()" id="cf-banksubs-btn" style="display:none">⇌ Hide matched</button>
+    <button onclick="cfToggleBankSubs()" id="cf-banksubs-btn" style="display:none">⇌ Show matched</button>
     <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
     <button onclick="openMgmtAcct()" id="cf-manage-btn" style="display:none">⚙ Manage</button>
     <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
@@ -993,7 +994,7 @@ let cfFilterText = '';
 let cfFilterRec  = 'all';   // 'all' | 'reconciled' | 'unreconciled'
 let cfPage     = 1;
 const CF_PER_PAGE = 50;
-let cfShowBankSubs = true;  // show/hide matched bank sub-rows
+let cfShowBankSubs = false;  // show/hide matched bank sub-rows
 
 // ── Section switching ─────────────────────────────────────────────────────────
 function showSection(section) {
@@ -1052,6 +1053,46 @@ function cfToggleBankSubs() {
   cfShowBankSubs = !cfShowBankSubs;
   document.getElementById('cf-banksubs-btn').textContent = cfShowBankSubs ? '⇌ Hide matched' : '⇌ Show matched';
   renderRegister();
+}
+
+// ── Description autocomplete helpers ─────────────────────────────────────────
+function _manualDescriptions() {
+  // Unique descriptions from manual transactions, preserving most-recent-first order
+  const seen = new Set();
+  const result = [];
+  for (const t of [...cfAllTxns].reverse()) {  // cfAllTxns is asc, reverse = newest first
+    if (t.source === 'manual' && t.description && !seen.has(t.description)) {
+      seen.add(t.description);
+      result.push({ description: t.description, amount: t.amount });
+    }
+  }
+  return result;
+}
+
+function _setupDescAutocomplete() {
+  const input = document.getElementById('txn-desc');
+  const list  = document.getElementById('txn-desc-list');
+  const amtEl = document.getElementById('txn-amount');
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    list.innerHTML = '';
+    if (!q) return;
+    const matches = _manualDescriptions().filter(d => d.description.toLowerCase().includes(q));
+    matches.slice(0, 8).forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.description;
+      list.appendChild(opt);
+    });
+  });
+
+  input.addEventListener('change', () => {
+    const val = input.value.trim();
+    const match = _manualDescriptions().find(d => d.description === val);
+    if (match && !amtEl.value.trim()) {
+      amtEl.value = match.amount.toFixed(2);
+    }
+  });
 }
 
 function cfUpdateToolbar() {
@@ -1491,6 +1532,7 @@ function escHtml(s) {
 }
 
 // ── Add / Edit Transaction ────────────────────────────────────────────────────
+let _descAutocompleteSetup = false;
 function openAddTxn() {
   document.getElementById('add-txn-title').textContent = 'Add Transaction';
   document.getElementById('edit-txn-id').value = '';
@@ -1500,6 +1542,7 @@ function openAddTxn() {
   document.getElementById('txn-notes').value = '';
   document.getElementById('add-txn-error').style.display = 'none';
   document.getElementById('add-txn-modal').classList.remove('hidden');
+  if (!_descAutocompleteSetup) { _setupDescAutocomplete(); _descAutocompleteSetup = true; }
   setTimeout(() => document.getElementById('txn-desc').focus(), 50);
 }
 function openEditTxn(id) {

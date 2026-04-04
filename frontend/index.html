@@ -125,12 +125,12 @@ button:hover { background: var(--surface2); }
   align-items: center; justify-content: center; z-index: 500;
 }
 #upload-modal.hidden { display: none; }
-#add-racct-modal, #add-txn-modal, #import-bank-modal, #add-to-ledger-modal {
+#add-racct-modal, #add-txn-modal, #import-bank-modal, #add-to-ledger-modal, #manage-acct-modal {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center; z-index: 500;
 }
 #add-racct-modal.hidden, #add-txn-modal.hidden,
-#import-bank-modal.hidden, #add-to-ledger-modal.hidden { display: none; }
+#import-bank-modal.hidden, #add-to-ledger-modal.hidden, #manage-acct-modal.hidden { display: none; }
 .modal-box {
   background: var(--surface); border-radius: var(--radius); padding: 28px;
   width: 420px; display: flex; flex-direction: column; gap: 14px;
@@ -316,6 +316,42 @@ button:hover { background: var(--surface2); }
   </div>
 </div>
 
+<!-- Manage Account modal -->
+<div id="manage-acct-modal" class="hidden">
+  <div class="modal-box">
+    <h2>Manage Account</h2>
+    <label style="font-size:12px;color:var(--text-muted)">Account Name</label>
+    <input type="text" id="mgmt-name" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;box-sizing:border-box">
+    <label style="font-size:12px;color:var(--text-muted);margin-top:10px;display:block">Notes</label>
+    <textarea id="mgmt-notes" rows="2" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;resize:vertical;box-sizing:border-box"></textarea>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Balance Cutoff</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Transactions before this date will be ignored on import. The balance below is used as the starting balance from that date forward.</div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div style="flex:1">
+          <label style="font-size:12px;color:var(--text-muted)">Cutoff Date</label>
+          <input type="date" id="mgmt-cutoff-date" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:3px;box-sizing:border-box">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:12px;color:var(--text-muted)">Balance as of cutoff</label>
+          <input type="text" id="mgmt-cutoff-balance" placeholder="e.g. 12345.67" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:3px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-top:6px">
+        <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="mgmt-clear-cutoff"> Clear cutoff (revert to opening balance)
+        </label>
+      </div>
+    </div>
+    <div id="mgmt-error" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
+    <div class="modal-footer" style="margin-top:14px">
+      <button style="color:var(--red);margin-right:auto" onclick="doDeleteRAcctFromMgmt()">Delete Account</button>
+      <button onclick="closeMgmtAcct()">Cancel</button>
+      <button class="btn-primary" onclick="doSaveMgmtAcct()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Add to Ledger modal -->
 <div id="add-to-ledger-modal" class="hidden">
   <div class="modal-box">
@@ -446,7 +482,7 @@ button:hover { background: var(--surface2); }
     <button onclick="openImportBank()" id="cf-import-btn" style="display:none">↑ Import</button>
     <button onclick="toggleReconcile()" id="cf-reconcile-btn" style="display:none">⇄ Reconcile</button>
     <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
-    <button onclick="doDeleteRAcct()" id="cf-delete-acct-btn" style="display:none;color:var(--red)">Delete Account</button>
+    <button onclick="openMgmtAcct()" id="cf-manage-btn" style="display:none">⚙ Manage</button>
     <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
   </div>
 
@@ -1002,7 +1038,7 @@ function cfUpdateToolbar() {
   document.getElementById('cf-import-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
-  document.getElementById('cf-delete-acct-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-manage-btn').style.display = has ? '' : 'none';
   if (has) {
     const v = fmtFull(cfBalances.verified_balance);
     const f = fmtFull(cfBalances.forecast_balance);
@@ -1024,7 +1060,6 @@ async function doDeleteRAcct() {
     cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0};
     if (cfReconciling) { cfReconciling = false; document.getElementById('register-view').classList.remove('hidden'); document.getElementById('reconcile-view').classList.remove('active'); }
     await cfLoadAccounts();
-    // Also refresh dashboard account list
     const acctRes = await fetch('/api/accounts');
     if (acctRes.ok) accounts = await acctRes.json();
     renderAccounts();
@@ -1032,6 +1067,79 @@ async function doDeleteRAcct() {
     renderRegister();
     cfUpdateToolbar();
   }
+}
+
+// ── Manage Account ────────────────────────────────────────────────────────────
+function openMgmtAcct() {
+  const acct = cfAccounts.find(a => a.id === cfCurrentId);
+  if (!acct) return;
+  document.getElementById('mgmt-name').value = acct.name;
+  document.getElementById('mgmt-notes').value = acct.notes || '';
+  document.getElementById('mgmt-cutoff-date').value = acct.cutoff_date || '';
+  document.getElementById('mgmt-cutoff-balance').value = acct.cutoff_balance != null ? acct.cutoff_balance.toFixed(2) : '';
+  document.getElementById('mgmt-clear-cutoff').checked = false;
+  document.getElementById('mgmt-error').style.display = 'none';
+  document.getElementById('manage-acct-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('mgmt-name').focus(), 50);
+}
+
+function closeMgmtAcct() {
+  document.getElementById('manage-acct-modal').classList.add('hidden');
+}
+
+async function doSaveMgmtAcct() {
+  const name = document.getElementById('mgmt-name').value.trim();
+  const notes = document.getElementById('mgmt-notes').value.trim();
+  const cutoffDateRaw = document.getElementById('mgmt-cutoff-date').value;
+  const cutoffBalRaw = document.getElementById('mgmt-cutoff-balance').value.trim();
+  const clearCutoff = document.getElementById('mgmt-clear-cutoff').checked;
+  const errEl = document.getElementById('mgmt-error');
+
+  if (!name) {
+    errEl.textContent = 'Account name is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const body = { name, notes: notes || null, clear_cutoff: clearCutoff };
+
+  if (!clearCutoff && cutoffDateRaw) {
+    const bal = cutoffBalRaw ? parseFloat(cutoffBalRaw.replace(/[$,\s]/g, '')) : null;
+    if (cutoffBalRaw && isNaN(bal)) {
+      errEl.textContent = 'Cutoff balance must be a valid number.';
+      errEl.style.display = 'block';
+      return;
+    }
+    body.cutoff_date = cutoffDateRaw;
+    body.cutoff_balance = bal;
+  }
+
+  const res = await fetch(`/api/register/accounts/${cfCurrentId}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+
+  if (res.ok) {
+    const updated = await res.json();
+    // Refresh account list and re-render
+    cfAccounts = cfAccounts.map(a => a.id === updated.id ? updated : a);
+    const sel = document.getElementById('cf-account-select');
+    [...sel.options].forEach(o => { if (parseInt(o.value) === updated.id) o.textContent = updated.name; });
+    closeMgmtAcct();
+    await cfLoadTxns();
+    const acctRes = await fetch('/api/accounts');
+    if (acctRes.ok) accounts = await acctRes.json();
+    renderAccounts();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    errEl.textContent = d.detail || 'Failed to save.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function doDeleteRAcctFromMgmt() {
+  closeMgmtAcct();
+  await doDeleteRAcct();
 }
 
 // ── Add Register Account ──────────────────────────────────────────────────────

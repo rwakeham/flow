@@ -80,27 +80,47 @@ class RegisterAccountCreate(BaseModel):
     opening_balance: float = 0.0
 
 
+class RegisterAccountUpdate(BaseModel):
+    name: str | None = None
+    notes: str | None = None
+    cutoff_date: DateType | None = None
+    cutoff_balance: float | None = None
+    clear_cutoff: bool = False  # explicitly clear the cutoff when True
+
+
+def _acct_dict(acct: RegisterAccount, current_balance: float) -> dict:
+    return {
+        "id": acct.id,
+        "name": acct.name,
+        "opening_balance": float(acct.opening_balance),
+        "notes": acct.notes,
+        "cutoff_date": acct.cutoff_date.isoformat() if acct.cutoff_date else None,
+        "cutoff_balance": float(acct.cutoff_balance) if acct.cutoff_balance is not None else None,
+        "current_balance": round(current_balance, 2),
+    }
+
+
+def _effective_opening(acct: RegisterAccount) -> tuple[float, "DateType | None"]:
+    """Return (starting_balance, cutoff_date_or_None) for running-balance calculations."""
+    if acct.cutoff_date is not None and acct.cutoff_balance is not None:
+        return float(acct.cutoff_balance), acct.cutoff_date
+    return float(acct.opening_balance), None
+
+
 @router.get("/accounts")
 def list_register_accounts(db: Session = Depends(get_db)):
     accounts = db.query(RegisterAccount).order_by(RegisterAccount.id).all()
     result = []
     for acct in accounts:
-        # Compute current balance = opening + sum of manual transaction amounts
-        row = db.execute(
-            text("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM transactions
-                WHERE register_account_id = :aid AND source = 'manual'
-            """),
-            {"aid": acct.id},
-        ).scalar()
-        current_balance = float(acct.opening_balance) + float(row)
-        result.append({
-            "id": acct.id,
-            "name": acct.name,
-            "opening_balance": float(acct.opening_balance),
-            "current_balance": round(current_balance, 2),
-        })
+        opening, cutoff_date = _effective_opening(acct)
+        query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE register_account_id = :aid AND source = 'manual'"
+        params: dict = {"aid": acct.id}
+        if cutoff_date:
+            query += " AND date >= :cutoff"
+            params["cutoff"] = cutoff_date
+        row = db.execute(text(query), params).scalar()
+        current_balance = opening + float(row)
+        result.append(_acct_dict(acct, current_balance))
     return result
 
 
@@ -113,7 +133,40 @@ def create_register_account(body: RegisterAccountCreate, db: Session = Depends(g
     db.add(acct)
     db.commit()
     db.refresh(acct)
-    return {"id": acct.id, "name": acct.name, "opening_balance": float(acct.opening_balance), "current_balance": float(acct.opening_balance)}
+    return _acct_dict(acct, float(acct.opening_balance))
+
+
+@router.patch("/accounts/{account_id}")
+def update_register_account(account_id: int, body: RegisterAccountUpdate, db: Session = Depends(get_db)):
+    acct = db.get(RegisterAccount, account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if body.name is not None:
+        conflict = db.query(RegisterAccount).filter(
+            RegisterAccount.name == body.name,
+            RegisterAccount.id != account_id,
+        ).first()
+        if conflict:
+            raise HTTPException(status_code=409, detail="Account name already exists")
+        acct.name = body.name
+    if body.notes is not None:
+        acct.notes = body.notes or None
+    if body.clear_cutoff:
+        acct.cutoff_date = None
+        acct.cutoff_balance = None
+    elif body.cutoff_date is not None:
+        acct.cutoff_date = body.cutoff_date
+        acct.cutoff_balance = body.cutoff_balance  # may be None if user only set date
+    db.commit()
+    db.refresh(acct)
+    opening, cutoff_date = _effective_opening(acct)
+    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE register_account_id = :aid AND source = 'manual'"
+    params: dict = {"aid": acct.id}
+    if cutoff_date:
+        query += " AND date >= :cutoff"
+        params["cutoff"] = cutoff_date
+    row = db.execute(text(query), params).scalar()
+    return _acct_dict(acct, opening + float(row))
 
 
 @router.delete("/accounts/{account_id}", status_code=204)
@@ -147,8 +200,12 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
-    return _compute_running_balance(float(acct.opening_balance), txns)
+    opening, cutoff_date = _effective_opening(acct)
+    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
+    if cutoff_date:
+        query = query.filter(Transaction.date >= cutoff_date)
+    txns = query.all()
+    return _compute_running_balance(opening, txns)
 
 
 @router.post("/{account_id}/transactions", status_code=201)
@@ -237,10 +294,15 @@ async def check_import(
     if result.format == FileFormat.UNKNOWN:
         raise HTTPException(status_code=422, detail="No transactions found in file")
 
+    _, cutoff_date = _effective_opening(acct)
+
     if result.format == FileFormat.LEDGER:
         would_import = 0
         would_skip = 0
         for row in result.ledger_rows:
+            if cutoff_date and row.date < cutoff_date:
+                would_skip += 1
+                continue
             existing = db.execute(
                 text("""
                     SELECT id FROM transactions
@@ -263,6 +325,9 @@ async def check_import(
     new_rows = []
     would_skip = 0
     for row in result.bank_rows:
+        if cutoff_date and row.date < cutoff_date:
+            would_skip += 1
+            continue
         # Would this be skipped as a bank duplicate?
         bank_dupe = db.execute(
             text("""
@@ -361,13 +426,14 @@ async def import_csv(
     if result.format == FileFormat.UNKNOWN:
         raise HTTPException(status_code=422, detail="No transactions found in file")
 
+    _, cutoff_date = _effective_opening(acct)
     if result.format == FileFormat.LEDGER:
-        return _import_ledger_rows(result.ledger_rows, account_id, db)
+        return _import_ledger_rows(result.ledger_rows, account_id, db, cutoff_date)
     else:
-        return _import_bank_rows(result.bank_rows, account_id, db)
+        return _import_bank_rows(result.bank_rows, account_id, db, cutoff_date)
 
 
-def _import_ledger_rows(rows, account_id: int, db) -> dict:
+def _import_ledger_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
     """
     Import rows from the user's manual tracking spreadsheet as manual transactions.
     Already-reconciled entries (X flag) are marked is_reconciled=True.
@@ -377,6 +443,9 @@ def _import_ledger_rows(rows, account_id: int, db) -> dict:
     imported = 0
     skipped = 0
     for row in rows:
+        if cutoff_date and row.date < cutoff_date:
+            skipped += 1
+            continue
         existing = db.execute(
             text("""
                 SELECT id FROM transactions
@@ -414,7 +483,7 @@ def _import_ledger_rows(rows, account_id: int, db) -> dict:
     }
 
 
-def _import_bank_rows(rows, account_id: int, db) -> dict:
+def _import_bank_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
     """
     Import rows from a bank export as bank transactions, then run auto-matching
     against any existing unmatched manual transactions.
@@ -431,6 +500,9 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
     new_bank_txns: list[Transaction] = []
 
     for row in rows:
+        if cutoff_date and row.date < cutoff_date:
+            continue
+
         # 1. Skip exact bank duplicates
         existing_bank = db.execute(
             text("""

@@ -300,10 +300,9 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
 
     Dedup logic (in order):
       1. Skip if an identical bank row already exists (same date/amount/description).
-      2. If an already-reconciled manual entry exists with the exact same date and
-         amount (and no bank row linked yet), import the bank row and link it to
-         that manual entry immediately — handles re-importing historical data that
-         was previously reconciled from a ledger spreadsheet import.
+      2. Skip if a reconciled manual entry already covers the same date and amount —
+         the manual entry is treated as authoritative, so deleting a bank row makes
+         the skip permanent even on re-import.
       3. Otherwise import as an unmatched bank row and run fuzzy auto-matching.
     """
     imported = 0
@@ -327,8 +326,9 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
         if existing_bank:
             continue
 
-        # 2. Check for an already-reconciled manual entry with same date + amount
-        #    that hasn't been linked to a bank row yet.
+        # 2. Skip if a reconciled manual entry already covers this date + amount.
+        #    This treats the manual entry as the authoritative record and makes
+        #    deletion of bank rows permanent (they won't re-appear on re-import).
         reconciled_manual = db.execute(
             text("""
                 SELECT id FROM transactions
@@ -337,11 +337,12 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
                   AND date = :dt
                   AND amount = :amt
                   AND is_reconciled = TRUE
-                  AND matched_to_id IS NULL
                 LIMIT 1
             """),
             {"aid": account_id, "dt": row.date, "amt": float(row.amount)},
         ).fetchone()
+        if reconciled_manual:
+            continue
 
         txn = Transaction(
             register_account_id=account_id,
@@ -355,15 +356,7 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
         db.add(txn)
         db.flush()
         imported += 1
-
-        if reconciled_manual:
-            manual_txn = db.get(Transaction, reconciled_manual.id)
-            txn.matched_to_id = manual_txn.id
-            txn.is_reconciled = True
-            manual_txn.matched_to_id = txn.id
-            auto_matched += 1
-        else:
-            new_bank_txns.append(txn)
+        new_bank_txns.append(txn)
 
     if not new_bank_txns:
         db.commit()

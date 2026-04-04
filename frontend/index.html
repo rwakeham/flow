@@ -1270,27 +1270,37 @@ function renderBankSubRow(t) {
   </tr>`;
 }
 
-function _rankManualForBank(bankTxn, manualList) {
-  // Exact date+amount match floats to the top (pre-selected).
-  // Everything else stays in chronological order (ascending date).
-  return [...(manualList || [])].sort((a, b) => {
+function _manualOptionsForBank(bankTxn, manualList, dayWindow = 14) {
+  // Filter to ±dayWindow days of the bank transaction date.
+  // Fall back to full list if nothing is nearby (so the dropdown is never empty).
+  const bMs = new Date(bankTxn.date).getTime();
+  const winMs = dayWindow * 86400000;
+  const nearby = (manualList || []).filter(m =>
+    Math.abs(new Date(m.date).getTime() - bMs) <= winMs
+  );
+  const candidates = nearby.length > 0 ? nearby : (manualList || []);
+  const usedFallback = nearby.length === 0 && (manualList || []).length > 0;
+
+  // Exact date+amount match floats to the top (pre-selected); rest chronological.
+  const sorted = [...candidates].sort((a, b) => {
     const aExact = a.date === bankTxn.date && Math.abs(a.amount - bankTxn.amount) < 0.001;
     const bExact = b.date === bankTxn.date && Math.abs(b.amount - bankTxn.amount) < 0.001;
     if (aExact !== bExact) return aExact ? -1 : 1;
-    // Otherwise chronological (ascending)
     if (a.date < b.date) return -1;
     if (a.date > b.date) return 1;
     return 0;
   });
+
+  return { sorted, usedFallback };
 }
 
 function renderBankUnmatchedRow(t, unmatchedManual) {
   const credit = t.amount > 0 ? fmtFull(t.amount) : '';
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
-  const ranked = _rankManualForBank(t, unmatchedManual);
-  const exactMatch = ranked[0] && ranked[0].date === t.date && Math.abs(ranked[0].amount - t.amount) < 0.001
-    ? ranked[0] : null;
-  const opts = ranked
+  const { sorted, usedFallback } = _manualOptionsForBank(t, unmatchedManual);
+  const exactMatch = sorted[0] && sorted[0].date === t.date && Math.abs(sorted[0].amount - t.amount) < 0.001
+    ? sorted[0] : null;
+  const opts = sorted
     .map(m => {
       const isExact = m.date === t.date && Math.abs(m.amount - t.amount) < 0.001;
       const label = `${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})${isExact ? ' ★' : ''}`;
@@ -1298,6 +1308,9 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
       return `<option value="${m.id}"${sel}>${label}</option>`;
     })
     .join('');
+  const placeholder = exactMatch ? '★ Exact match pre-selected ↓'
+    : usedFallback ? 'Find Match… (no entries within ±14 days)'
+    : 'Find Match…';
   const safeDesc = JSON.stringify(t.bank_description || t.description).replace(/"/g, '&quot;');
   return `<tr class="row-bank-unmatched" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>
@@ -1305,7 +1318,7 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
       <span class="bank-desc">${escHtml(t.bank_description || t.description)}</span>
       <div class="row-actions" style="margin-top:4px">
         <select class="match-select" id="match-sel-${t.id}">
-          <option value="">${exactMatch ? '★ Exact match pre-selected ↓' : 'Find Match…'}</option>${opts}
+          <option value="">${placeholder}</option>${opts}
         </select>
         <button class="btn-sm btn-primary" onclick="doManualMatch(${t.id})">Match</button>
         <button class="btn-sm" onclick="openAtl(${t.id}, ${safeDesc})">+ Add to Ledger</button>
@@ -1530,16 +1543,18 @@ async function renderReconcile() {
           &ensp;<span style="color:var(--text-muted)">${(sug.score * 100).toFixed(0)}% match</span>
           <button class="btn-sm btn-primary" onclick="doRecMatch(${t.id}, ${sug.manual_id})">✓ Match</button>
         </div>` : '';
-      // Rank manual options by relevance to this bank transaction
-      const ranked = _rankManualForBank(t, data.unmatched_manual);
-      const exactMatch = ranked[0] && ranked[0].date === t.date && Math.abs(ranked[0].amount - t.amount) < 0.001
-        ? ranked[0] : null;
-      const manualOptions = ranked.map(m => {
+      const { sorted: recSorted, usedFallback: recFallback } = _manualOptionsForBank(t, data.unmatched_manual);
+      const exactMatch = recSorted[0] && recSorted[0].date === t.date && Math.abs(recSorted[0].amount - t.amount) < 0.001
+        ? recSorted[0] : null;
+      const manualOptions = recSorted.map(m => {
         const isExact = m.date === t.date && Math.abs(m.amount - t.amount) < 0.001;
         const label = `${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})${isExact ? ' ★' : ''}`;
         const sel = isExact ? ' selected' : '';
         return `<option value="${m.id}"${sel}>${label}</option>`;
       }).join('');
+      const recPlaceholder = exactMatch ? '★ Exact match pre-selected ↓'
+        : recFallback ? 'Find Match… (no entries within ±14 days)'
+        : 'Find Match…';
       return `
         <div class="rec-row" data-id="${t.id}">
           <div class="rec-row-top">
@@ -1550,7 +1565,7 @@ async function renderReconcile() {
           ${sugHtml}
           <div class="rec-actions">
             <select class="match-select" id="rec-sel-${t.id}">
-              <option value="">${exactMatch ? '★ Exact match pre-selected ↓' : 'Find Match…'}</option>
+              <option value="">${recPlaceholder}</option>
               ${manualOptions}
             </select>
             <button class="btn-sm" onclick="doRecMatchSel(${t.id})">Match</button>

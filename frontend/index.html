@@ -991,8 +991,6 @@ function showSection(section) {
   document.getElementById('cashflow-app').classList.toggle('hidden', isDash);
   document.getElementById('nav-dashboard').classList.toggle('active', isDash);
   document.getElementById('nav-cashflow').classList.toggle('active', !isDash);
-  // Hide the net-worth Import button when in Cash Flow view
-  document.querySelector('#topbar button[onclick="openUpload()"]').style.display = isDash ? '' : 'none';
   if (!isDash) cfLoadAccounts();
 }
 

@@ -1300,7 +1300,10 @@ function buildGroups(txns) {
   const usedBankIds = new Set();
 
   for (const t of txns) {
-    if (t.source === 'bank') {
+    // Treat as a bank row if source='bank', OR if bank_description is set and the
+    // row is unmatched (covers old imports that defaulted to source='manual').
+    const isBankOrigin = t.source === 'bank' || (!!t.bank_description && !t.matched_to_id);
+    if (isBankOrigin) {
       if (t.matched_to_id) usedBankIds.add(t.id); // will appear as sub-row
       else groups.push({primary: t, bank: null, isBank: true});
       continue;

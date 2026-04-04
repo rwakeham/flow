@@ -47,24 +47,34 @@ def _txn_dict(t: Transaction, balance: float | None = None) -> dict:
 def _compute_running_balance(opening: float, txns: list[Transaction]) -> dict:
     """
     Computes running balances for all transactions in chronological order.
+    Running balance includes:
+      - All manual transactions
+      - Unmatched bank transactions (real money that hasn't been ledgered yet)
+      - Matched bank rows are excluded (their manual counterpart is already counted)
     Returns:
-      transactions    — list in ascending date order, each manual row has 'balance' (forecast)
-      forecast_balance — total including all manual transactions
-      verified_balance — total including only reconciled manual transactions
+      transactions     — ascending date order; every row has 'balance'
+      forecast_balance — opening + all manual transactions
+      verified_balance — opening + reconciled manual transactions only
     """
     sorted_txns = sorted(txns, key=lambda t: (t.date, t.created_at or t.id))
 
+    running_bal = opening
     forecast_bal = opening
     verified_bal = opening
     result = []
     for t in sorted_txns:
         if t.source == "manual":
+            running_bal += float(t.amount)
             forecast_bal += float(t.amount)
             if t.is_reconciled:
                 verified_bal += float(t.amount)
-            result.append(_txn_dict(t, forecast_bal))
+            result.append(_txn_dict(t, running_bal))
         else:
-            result.append(_txn_dict(t))
+            # Unmatched bank rows affect the running balance display;
+            # matched bank rows don't (the manual counterpart already counted).
+            if t.matched_to_id is None:
+                running_bal += float(t.amount)
+            result.append(_txn_dict(t, running_bal))
 
     return {
         "transactions": result,
@@ -200,11 +210,8 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    opening, cutoff_date = _effective_opening(acct)
-    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
-    if cutoff_date:
-        query = query.filter(Transaction.date >= cutoff_date)
-    txns = query.all()
+    opening, _ = _effective_opening(acct)
+    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
     return _compute_running_balance(opening, txns)
 
 
@@ -300,9 +307,6 @@ async def check_import(
         would_import = 0
         would_skip = 0
         for row in result.ledger_rows:
-            if cutoff_date and row.date < cutoff_date:
-                would_skip += 1
-                continue
             existing = db.execute(
                 text("""
                     SELECT id FROM transactions
@@ -443,9 +447,6 @@ def _import_ledger_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
     imported = 0
     skipped = 0
     for row in rows:
-        if cutoff_date and row.date < cutoff_date:
-            skipped += 1
-            continue
         existing = db.execute(
             text("""
                 SELECT id FROM transactions

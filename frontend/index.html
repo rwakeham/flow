@@ -67,6 +67,7 @@ button:hover { background: var(--surface2); }
   display: flex; align-items: center; padding: 0 24px; height: 52px; gap: 12px;
 }
 #topbar h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
+#topbar .logo { height: 36px; width: auto; flex: 1; object-fit: contain; object-position: left; }
 #topbar .spacer { flex: 1; }
 
 /* ── Layout ── */
@@ -221,7 +222,9 @@ button:hover { background: var(--surface2); }
 
 /* ── Register filter bar ── */
 .reg-filter-bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.reg-filter-bar input[type=text] { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; min-width: 180px; flex: 1; }
+.reg-filter-bar input[type=text],
+.reg-filter-bar input[type=number] { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
+.reg-filter-bar input[type=text] { min-width: 180px; flex: 1; }
 .reg-filter-bar select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
 .reg-filter-bar .filter-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
 /* ── Sortable headers ── */
@@ -378,7 +381,7 @@ button:hover { background: var(--surface2); }
 
 <!-- Top bar -->
 <div id="topbar">
-  <h1>flow</h1>
+  <img src="/static/logo.png" alt="Flow" class="logo">
   <div class="section-nav">
     <button class="section-btn active" id="nav-dashboard" onclick="showSection('dashboard')">Dashboard</button>
     <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>
@@ -575,8 +578,9 @@ const LIAB_COLORS   = ['#E24B4A','#F09595'];
 const GRID          = 'rgba(128,128,128,0.12)';
 const TICK          = '#888';
 
-let tsData = null;   // timeseries API response
-let accounts = [];   // accounts list
+let tsData    = null;     // timeseries API response (regular accounts)
+let regTsData = {periods: [], accounts: []};  // register account month-end balances
+let accounts  = [];   // accounts list
 let charts = {};     // chart instances keyed by id
 let nwMode = '$';
 
@@ -729,7 +733,7 @@ function renderAccounts() {
         <span class="acct-name">${a.name}</span>
         <span class="badge badge-register">register</span>
         <span style="font-size:12px;color:var(--text-muted);margin-left:auto">${fmtFull(a.current_balance)}</span>
-        <button onclick="showSection('cashflow')" style="font-size:11px;padding:3px 8px">Open →</button>
+        <button onclick="openRegisterAccount(${a.id})" style="font-size:11px;padding:3px 8px">Open →</button>
       </div>`).join('');
   }
 
@@ -753,11 +757,12 @@ function baseOpts(yFmt) {
 
 // ── Load everything ───────────────────────────────────────────────────────────
 async function loadAll() {
-  const [sumRes, tsRes, acctRes, regRes] = await Promise.all([
+  const [sumRes, tsRes, acctRes, regRes, regTsRes] = await Promise.all([
     fetch('/api/data/summary'),
     fetch('/api/data/timeseries'),
     fetch('/api/accounts'),
     fetch('/api/register/accounts'),
+    fetch('/api/register/accounts/timeseries'),
   ]);
   if (sumRes.status === 401 || tsRes.status === 401) {
     document.getElementById('app').classList.add('hidden');
@@ -768,10 +773,11 @@ async function loadAll() {
   tsData     = await tsRes.json();
   accounts   = await acctRes.json();
   cfAccounts = regRes.ok ? await regRes.json() : [];
+  regTsData  = regTsRes.ok ? await regTsRes.json() : {periods: [], accounts: []};
 
   renderCards(sum);
   renderAccounts();
-  if (tsData.periods.length > 0) renderAllCharts();
+  if (tsData.periods.length > 0 || regTsData.periods.length > 0) renderAllCharts();
 }
 
 // ── Metric cards ──────────────────────────────────────────────────────────────
@@ -801,18 +807,44 @@ function renderCards(s) {
 }
 
 // ── Derived series ────────────────────────────────────────────────────────────
+// Forward-fill values from sourcePeriods into targetPeriods.
+function _reindex(values, sourcePeriods, targetPeriods) {
+  const byPeriod = {};
+  sourcePeriods.forEach((p, i) => { byPeriod[p] = values[i]; });
+  let last = null;
+  return targetPeriods.map(p => { if (p in byPeriod) last = byPeriod[p]; return last; });
+}
+
 function deriveSeries() {
-  const { periods, accounts: accts } = tsData;
+  const accts = (tsData && tsData.accounts) ? tsData.accounts : [];
+  const tsPeriods = (tsData && tsData.periods) ? tsData.periods : [];
+
+  // Merge regular and register account periods into a unified sorted list
+  const periods = [...new Set([...tsPeriods, ...regTsData.periods])].sort();
   const n = periods.length;
-  const assets  = accts.filter(a => a.account_type === 'asset' && !a.ignored);
-  const liabs   = accts.filter(a => a.account_type === 'liability' && !a.ignored);
-  const allAssets = accts.filter(a => a.account_type === 'asset');
-  const allLiabs  = accts.filter(a => a.account_type === 'liability');
-  const totalAssets = periods.map((_, i) => assets.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+
+  const ri = (a, src) => ({ ...a, values: _reindex(a.values, src, periods) });
+
+  const assets  = accts.filter(a => a.account_type === 'asset'     && !a.ignored).map(a => ri(a, tsPeriods));
+  const liabs   = accts.filter(a => a.account_type === 'liability'  && !a.ignored).map(a => ri(a, tsPeriods));
+  const allAssets = accts.filter(a => a.account_type === 'asset').map(a => ri(a, tsPeriods));
+  const allLiabs  = accts.filter(a => a.account_type === 'liability').map(a => ri(a, tsPeriods));
+
+  // Register accounts appear as non-ignored assets of type "cash"
+  const cashAssets = regTsData.accounts.map(a => ({
+    ...a, account_type: 'asset', cash: true, ignored: false,
+    values: _reindex(a.values, regTsData.periods, periods),
+  }));
+
+  const allAssetsWithCash = [...assets, ...cashAssets];
+  const allWithCash       = [...allAssets, ...cashAssets];
+
+  const totalAssets = periods.map((_, i) => allAssetsWithCash.reduce((s, a) => s + (a.values[i] ?? 0), 0));
   const totalLiabs  = periods.map((_, i) => liabs.reduce((s, a) => s + (a.values[i] ?? 0), 0));
   const netWorth    = periods.map((_, i) => totalAssets[i] + totalLiabs[i]);
   const dta         = periods.map((_, i) => totalAssets[i] ? Math.abs(totalLiabs[i]) / totalAssets[i] * 100 : 0);
-  return { assets, liabs, allAssets, allLiabs, totalAssets, totalLiabs, netWorth, dta, n };
+
+  return { assets: allAssetsWithCash, liabs, allAssets: allWithCash, allLiabs, totalAssets, totalLiabs, netWorth, dta, n, periods };
 }
 
 // ── Net worth chart ───────────────────────────────────────────────────────────
@@ -823,10 +855,7 @@ function setNwMode(mode, btn) {
   renderNwChart();
 }
 function renderNwChart() {
-  const { periods, netWorth, totalAssets, totalLiabs } = (() => {
-    const d = deriveSeries();
-    return { periods: tsData.periods, netWorth: d.netWorth, totalAssets: d.totalAssets, totalLiabs: d.totalLiabs };
-  })();
+  const { periods, netWorth, totalAssets, totalLiabs } = deriveSeries();
   destroyChart('chart-nw');
   let nwVals = netWorth, assetVals = totalAssets, liabVals = totalLiabs.map(v => Math.abs(v));
   let yFmt = fmt;
@@ -836,7 +865,7 @@ function renderNwChart() {
     nwVals = idx(netWorth); assetVals = idx(totalAssets); liabVals = idx(totalLiabs.map(Math.abs));
     yFmt = v => fmtPct(v);
   }
-  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
   const opts = baseOpts(yFmt);
   opts.scales.x.ticks.maxRotation = 40;
   charts['chart-nw'] = new Chart(document.getElementById('chart-nw'), {
@@ -852,9 +881,9 @@ function renderNwChart() {
 
 // ── Allocation doughnut ───────────────────────────────────────────────────────
 function renderAllocChart() {
-  const { assets } = deriveSeries();
-  const n = tsData.periods.length - 1;
-  const labels = assets.map(a => a.name);
+  const { assets, periods } = deriveSeries();
+  const n = periods.length - 1;
+  const labels = assets.map(a => a.cash ? a.name + ' (Cash)' : a.name);
   const values = assets.map(a => Math.max(0, a.values[n] ?? 0));
   destroyChart('chart-alloc');
   charts['chart-alloc'] = new Chart(document.getElementById('chart-alloc'), {
@@ -869,7 +898,7 @@ function renderAllocChart() {
 
 // ── Debt-to-asset chart ───────────────────────────────────────────────────────
 function renderDtaChart() {
-  const { dta } = deriveSeries();
+  const { dta, periods } = deriveSeries();
   const n = dta.length;
   const curr = dta[n-1], prev = dta[n-2];
   const delta = (prev !== undefined) ? curr - prev : null;
@@ -880,7 +909,7 @@ function renderDtaChart() {
     dd.className = 'card-delta ' + (delta > 0 ? 'delta-down' : 'delta-up');
   }
   const pointColors = dta.map((v, i) => i === 0 ? TICK : (v <= dta[i-1] ? '#22c55e' : '#ef4444'));
-  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
   const mn = Math.min(...dta), mx = Math.max(...dta);
   destroyChart('chart-dta');
   charts['chart-dta'] = new Chart(document.getElementById('chart-dta'), {
@@ -901,8 +930,7 @@ function renderDtaChart() {
 
 // ── MoM change bar chart ──────────────────────────────────────────────────────
 function renderMomChart() {
-  const { assets, liabs } = deriveSeries();
-  const n = tsData.periods.length;
+  const { assets, liabs, n } = deriveSeries();
   if (n < 2) return;
   const allAccts = [...assets, ...liabs];
   const labels = allAccts.map(a => a.name);
@@ -928,11 +956,11 @@ function renderMomChart() {
 
 // ── Assets tab chart ──────────────────────────────────────────────────────────
 function renderAssetsChart() {
-  const { assets } = deriveSeries();
-  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const { assets, periods } = deriveSeries();
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
   const legend = document.getElementById('legend-assets');
   legend.innerHTML = assets.map((a, i) =>
-    `<div class="legend-item"><div class="legend-dot" style="background:${ASSET_COLORS[i % ASSET_COLORS.length]}"></div>${a.name}</div>`
+    `<div class="legend-item"><div class="legend-dot" style="background:${ASSET_COLORS[i % ASSET_COLORS.length]}"></div>${a.name}${a.cash ? ' <span style="font-size:10px;color:var(--text-muted)">(Cash)</span>' : ''}</div>`
   ).join('');
   destroyChart('chart-assets');
   charts['chart-assets'] = new Chart(document.getElementById('chart-assets'), {
@@ -946,13 +974,13 @@ function renderAssetsChart() {
 
 // ── Liabilities tab chart ─────────────────────────────────────────────────────
 function renderLiabChart() {
-  const { liabs } = deriveSeries();
+  const { liabs, periods } = deriveSeries();
   if (!liabs.length) {
     document.getElementById('legend-liab').innerHTML = '';
     destroyChart('chart-liab');
     return;
   }
-  const labels = tsData.periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
   document.getElementById('legend-liab').innerHTML = liabs.map((a, i) =>
     `<div class="legend-item"><div class="legend-dot" style="background:${LIAB_COLORS[i % LIAB_COLORS.length]}"></div>${a.name}</div>`
   ).join('');
@@ -1014,6 +1042,15 @@ function showSection(section) {
   document.getElementById('nav-dashboard').classList.toggle('active', isDash);
   document.getElementById('nav-cashflow').classList.toggle('active', !isDash);
   if (!isDash) cfLoadAccounts();
+}
+
+async function openRegisterAccount(id) {
+  showSection('cashflow');
+  // Wait for cfLoadAccounts to populate the dropdown, then select the account
+  await cfLoadAccounts();
+  cfSelectAccount(String(id));
+  const sel = document.getElementById('cf-account-select');
+  if (sel) sel.value = id;
 }
 
 // ── Formatting helpers (cf-specific) ─────────────────────────────────────────

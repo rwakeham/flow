@@ -212,6 +212,127 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_db)):
 
 # ── Import (bank export or manual ledger spreadsheet) ─────────────────────────
 
+@router.post("/{account_id}/import/check")
+async def check_import(
+    account_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Dry-run: parse the file and return what would be imported without writing anything.
+    """
+    acct = db.get(RegisterAccount, account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+
+    try:
+        result = parse_register_import(content)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+
+    if result.format == FileFormat.UNKNOWN:
+        raise HTTPException(status_code=422, detail="No transactions found in file")
+
+    if result.format == FileFormat.LEDGER:
+        would_import = 0
+        would_skip = 0
+        for row in result.ledger_rows:
+            existing = db.execute(
+                text("""
+                    SELECT id FROM transactions
+                    WHERE register_account_id = :aid
+                      AND source = 'manual'
+                      AND date = :dt
+                      AND amount = :amt
+                      AND description = :desc
+                    LIMIT 1
+                """),
+                {"aid": account_id, "dt": row.date, "amt": float(row.amount), "desc": row.description},
+            ).fetchone()
+            if existing:
+                would_skip += 1
+            else:
+                would_import += 1
+        return {"format": "ledger", "would_import": would_import, "would_skip": would_skip}
+
+    # Bank format
+    new_rows = []
+    would_skip = 0
+    for row in result.bank_rows:
+        # Would this be skipped as a bank duplicate?
+        bank_dupe = db.execute(
+            text("""
+                SELECT id FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'bank'
+                  AND date = :dt
+                  AND amount = :amt
+                  AND bank_description = :desc
+                LIMIT 1
+            """),
+            {"aid": account_id, "dt": row.date, "amt": row.amount, "desc": row.bank_description},
+        ).fetchone()
+        if bank_dupe:
+            would_skip += 1
+            continue
+
+        # Would this match an already-reconciled manual entry?
+        reconciled_manual = db.execute(
+            text("""
+                SELECT id FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'manual'
+                  AND date = :dt
+                  AND amount = :amt
+                  AND is_reconciled = TRUE
+                LIMIT 1
+            """),
+            {"aid": account_id, "dt": row.date, "amt": float(row.amount)},
+        ).fetchone()
+        if reconciled_manual:
+            would_skip += 1
+            continue
+
+        new_rows.append(row)
+
+    # Estimate fuzzy auto-matches for genuinely new rows
+    would_auto_match = 0
+    if new_rows:
+        unmatched_manual = db.execute(
+            text("""
+                SELECT id, date, amount, description FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'manual'
+                  AND matched_to_id IS NULL
+                  AND is_reconciled = FALSE
+            """),
+            {"aid": account_id},
+        ).fetchall()
+        bank_infos = [
+            TxnInfo(id=i, date=r.date, amount=float(r.amount), description=r.bank_description or "")
+            for i, r in enumerate(new_rows)
+        ]
+        manual_infos = [
+            TxnInfo(id=r.id, date=r.date, amount=float(r.amount), description=r.description)
+            for r in unmatched_manual
+        ]
+        suggestions = suggest_matches(bank_infos, manual_infos)
+        would_auto_match = len(suggestions)
+
+    would_import = len(new_rows)
+    return {
+        "format": "bank",
+        "would_import": would_import,
+        "would_skip": would_skip,
+        "would_auto_match": would_auto_match,
+        "would_unmatched": would_import - would_auto_match,
+    }
+
+
 @router.post("/{account_id}/import")
 async def import_csv(
     account_id: int,

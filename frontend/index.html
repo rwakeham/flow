@@ -306,12 +306,12 @@ button:hover { background: var(--surface2); }
 <div id="import-bank-modal" class="hidden">
   <div class="modal-box">
     <h2>Import Transactions</h2>
-    <p>Upload a bank export <em>or</em> your existing ledger spreadsheet (tab-separated). Format is detected automatically. Duplicates are skipped.</p>
-    <input type="file" id="bank-import-file" accept=".csv,.tsv,.txt">
+    <p>Select a bank export <em>or</em> your existing ledger spreadsheet (tab-separated). Format is detected automatically. Duplicates are skipped.</p>
+    <input type="file" id="bank-import-file" accept=".csv,.tsv,.txt" onchange="importBankFileChanged()">
     <div id="bank-import-result" style="font-size:13px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm);display:none"></div>
     <div class="modal-footer">
       <button onclick="closeImportBank()">Cancel</button>
-      <button class="btn-primary" onclick="doImportBank()">Import</button>
+      <button class="btn-primary" id="import-bank-btn" onclick="doImportBankStep()" disabled>Upload</button>
     </div>
   </div>
 </div>
@@ -1445,29 +1445,87 @@ function openImportBank() {
   document.getElementById('import-bank-modal').classList.remove('hidden');
   document.getElementById('bank-import-file').value = '';
   document.getElementById('bank-import-result').style.display = 'none';
+  const btn = document.getElementById('import-bank-btn');
+  btn.textContent = 'Upload';
+  btn.disabled = true;
+  btn.dataset.phase = 'check';
 }
 function closeImportBank() { document.getElementById('import-bank-modal').classList.add('hidden'); }
-async function doImportBank() {
+
+function importBankFileChanged() {
+  const btn = document.getElementById('import-bank-btn');
+  const hasFile = !!document.getElementById('bank-import-file').files[0];
+  btn.textContent = 'Upload';
+  btn.disabled = !hasFile;
+  btn.dataset.phase = 'check';
+  document.getElementById('bank-import-result').style.display = 'none';
+}
+
+async function doImportBankStep() {
+  const btn = document.getElementById('import-bank-btn');
+  if (btn.dataset.phase === 'check') {
+    await _doImportBankCheck();
+  } else {
+    await _doImportBankCommit();
+  }
+}
+
+async function _doImportBankCheck() {
   const f = document.getElementById('bank-import-file').files[0];
   if (!f) return;
+  const btn = document.getElementById('import-bank-btn');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
   const fd = new FormData(); fd.append('file', f);
-  const res = await fetch(`/api/register/${cfCurrentId}/import`, {method:'POST', body: fd});
+  const res = await fetch(`/api/register/${cfCurrentId}/import/check`, {method:'POST', body: fd});
   const r = document.getElementById('bank-import-result');
   r.style.display = 'block';
   if (res.ok) {
     const d = await res.json();
     r.style.color = 'var(--green)';
     if (d.format === 'ledger') {
-      r.innerHTML = `✓ Ledger import: ${d.imported} transactions added${d.skipped ? `, ${d.skipped} duplicates skipped` : ''}.`;
+      r.innerHTML = `✓ Ledger import: ${d.would_import} transactions to add${d.would_skip ? `, ${d.would_skip} duplicates will be skipped` : ''}.`;
     } else {
-      r.innerHTML = `✓ Bank import: ${d.imported} transactions. Auto-matched: ${d.auto_matched}. Unmatched: ${d.unmatched}.`
-        + (d.unmatched > 0 ? ' <a href="#" onclick="closeImportBank();toggleReconcile();return false" style="color:var(--accent)">Reconcile now →</a>' : '');
+      r.innerHTML = `✓ Bank import: ${d.would_import} new transactions. Auto-matched: ${d.would_auto_match}. Unmatched: ${d.would_unmatched}.`
+        + (d.would_skip ? `<br><span style="color:var(--text-muted)">${d.would_skip} already-imported rows will be skipped.</span>` : '');
     }
+    btn.textContent = 'Import';
+    btn.disabled = false;
+    btn.dataset.phase = 'commit';
+  } else {
+    const d = await res.json().catch(() => ({detail:'Could not read file'}));
+    r.style.color = 'var(--red)';
+    r.textContent = '✗ ' + (d.detail || 'Could not read file');
+    btn.textContent = 'Upload';
+    btn.disabled = false;
+    btn.dataset.phase = 'check';
+  }
+}
+
+async function _doImportBankCommit() {
+  const f = document.getElementById('bank-import-file').files[0];
+  if (!f) return;
+  const btn = document.getElementById('import-bank-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  const fd = new FormData(); fd.append('file', f);
+  const res = await fetch(`/api/register/${cfCurrentId}/import`, {method:'POST', body: fd});
+  if (res.ok) {
+    const d = await res.json();
+    closeImportBank();
     await cfLoadTxns();
+    if (d.format === 'bank' && d.unmatched > 0) {
+      toggleReconcile();
+    }
   } else {
     const d = await res.json().catch(() => ({detail:'Import failed'}));
+    const r = document.getElementById('bank-import-result');
+    r.style.display = 'block';
     r.style.color = 'var(--red)';
     r.textContent = '✗ ' + (d.detail || 'Import failed');
+    btn.textContent = 'Import';
+    btn.disabled = false;
+    btn.dataset.phase = 'commit';
   }
 }
 

@@ -210,9 +210,15 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    opening, _ = _effective_opening(acct)
-    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
-    return _compute_running_balance(opening, txns)
+    opening, cutoff_date = _effective_opening(acct)
+    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
+    if cutoff_date:
+        query = query.filter(Transaction.date >= cutoff_date)
+    txns = query.all()
+    result = _compute_running_balance(opening, txns)
+    result["cutoff_date"] = acct.cutoff_date.isoformat() if acct.cutoff_date else None
+    result["cutoff_balance"] = float(acct.cutoff_balance) if acct.cutoff_balance is not None else None
+    return result
 
 
 @router.post("/{account_id}/transactions", status_code=201)

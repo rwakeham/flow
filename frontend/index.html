@@ -232,6 +232,8 @@ button:hover { background: var(--surface2); }
 /* ── Balance variants ── */
 .balance-forecast { color: var(--text-muted); font-style: italic; }
 .balance-forecast::before { content: '~'; font-size: 10px; }
+.cutoff-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; color: var(--text-muted); padding: 6px 10px; }
+.cutoff-row .cutoff-bal { font-weight: 700; color: var(--text); font-size: 13px; }
 /* ── Pagination ── */
 .reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .reg-pagination button { padding: 3px 10px; font-size: 12px; }
@@ -517,6 +519,7 @@ button:hover { background: var(--surface2); }
         <tbody id="register-tbody">
           <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>
         </tbody>
+        <tfoot id="register-tfoot"></tfoot>
       </table>
       <div class="reg-pagination" id="reg-pagination" style="display:none">
         <button id="reg-prev" onclick="cfChangePage(-1)">‹ Prev</button>
@@ -608,7 +611,7 @@ async function doLogout() {
   // Reset section nav
   document.getElementById('nav-dashboard').classList.add('active');
   document.getElementById('nav-cashflow').classList.remove('active');
-  cfCurrentId = null; cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0}; cfAccounts = []; cfReconciling = false; cfPage = 1;
+  cfCurrentId = null; cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null}; cfAccounts = []; cfReconciling = false; cfPage = 1;
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -1032,7 +1035,7 @@ function cfSelectAccount(val) {
   cfPage = 1; cfFilterText = ''; cfFilterRec = 'all';
   cfUpdateToolbar();
   if (cfCurrentId) cfLoadTxns();
-  else { cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0}; renderRegister(); }
+  else { cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null}; renderRegister(); }
 }
 
 function cfToggleBankSubs() {
@@ -1066,7 +1069,7 @@ async function doDeleteRAcct() {
   const res = await fetch(`/api/register/accounts/${cfCurrentId}`, {method: 'DELETE'});
   if (res.ok || res.status === 204) {
     cfCurrentId = null;
-    cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0};
+    cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null};
     if (cfReconciling) { cfReconciling = false; document.getElementById('register-view').classList.remove('hidden'); document.getElementById('reconcile-view').classList.remove('active'); }
     await cfLoadAccounts();
     const acctRes = await fetch('/api/accounts');
@@ -1189,7 +1192,12 @@ async function cfLoadTxns() {
   if (!res.ok) return;
   const data = await res.json();
   cfAllTxns  = data.transactions || [];
-  cfBalances = {forecast_balance: data.forecast_balance, verified_balance: data.verified_balance};
+  cfBalances = {
+    forecast_balance: data.forecast_balance,
+    verified_balance: data.verified_balance,
+    cutoff_date: data.cutoff_date || null,
+    cutoff_balance: data.cutoff_balance != null ? data.cutoff_balance : null,
+  };
   cfUpdateToolbar();
   renderRegister();
   if (cfReconciling) await renderReconcile();
@@ -1289,9 +1297,11 @@ function renderRegister() {
   const filterBar  = document.getElementById('reg-filter-bar');
   const pagination = document.getElementById('reg-pagination');
 
+  const tfoot = document.getElementById('register-tfoot');
   if (!cfCurrentId) {
     filterBar.style.display = 'none'; pagination.style.display = 'none';
     tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
+    tfoot.innerHTML = '';
     return;
   }
   filterBar.style.display = '';
@@ -1349,6 +1359,18 @@ function renderRegister() {
     }
   }
   tbody.innerHTML = html;
+
+  // Cutoff balance marker — shown in tfoot so it's always below all transactions
+  if (cfBalances.cutoff_date && cfBalances.cutoff_balance != null) {
+    tfoot.innerHTML = `<tr class="cutoff-row">
+      <td>${cfFmtDate(cfBalances.cutoff_date)}</td>
+      <td colspan="3" style="font-style:italic">Balance override — transactions before this date are hidden</td>
+      <td class="num"><span class="cutoff-bal">${fmtFull(cfBalances.cutoff_balance)}</span></td>
+      <td></td><td></td>
+    </tr>`;
+  } else {
+    tfoot.innerHTML = '';
+  }
 }
 
 function renderManualRow(t) {

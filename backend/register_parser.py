@@ -283,9 +283,18 @@ def _parse_accounting_amount(s: str) -> float | None:
 
 
 def _parse_date(s: str) -> date:
-    """Parse M/D/YY or M/D/YYYY date strings."""
+    """Parse date strings in common CSV export formats."""
     s = s.strip()
-    for fmt in ("%m/%d/%y", "%m/%d/%Y"):
+    # Try ISO format first (YYYY-MM-DD) since it's unambiguous
+    for fmt in (
+        "%Y-%m-%d",      # 2026-01-15
+        "%m/%d/%y",      # 1/15/26 or 01/15/26
+        "%m/%d/%Y",      # 1/15/2026 or 01/15/2026
+        "%m-%d-%Y",      # 01-15-2026
+        "%m-%d-%y",      # 01-15-26
+        "%d/%m/%Y",      # 15/01/2026 (some international exports)
+        "%Y/%m/%d",      # 2026/01/15
+    ):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:

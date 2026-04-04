@@ -1057,11 +1057,13 @@ function cfToggleBankSubs() {
 
 // ── Description autocomplete helpers ─────────────────────────────────────────
 function _manualDescriptions() {
-  // Unique descriptions from manual transactions, preserving most-recent-first order
+  // Unique descriptions from manual transactions only (never bank-imported rows).
+  // Guard on both source and bank_description to catch rows where source may have
+  // defaulted to 'manual' before the column existed.
   const seen = new Set();
   const result = [];
   for (const t of [...cfAllTxns].reverse()) {  // cfAllTxns is asc, reverse = newest first
-    if (t.source === 'manual' && t.description && !seen.has(t.description)) {
+    if (t.source === 'manual' && !t.bank_description && t.description && !seen.has(t.description)) {
       seen.add(t.description);
       result.push({ description: t.description, amount: t.amount });
     }
@@ -1439,6 +1441,7 @@ function renderManualRow(t) {
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
   const recIcon    = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
   const editBtn    = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
+  const dupeBtn    = `<button class="btn-sm" onclick="openDupeTxn(${t.id})" title="Duplicate">⧉</button>`;
   const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
   const unmatchBtn = t.matched_to_id
     ? `<button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button>`
@@ -1449,7 +1452,7 @@ function renderManualRow(t) {
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
     <td>${recIcon}</td>
-    <td><div class="row-actions">${editBtn}${unmatchBtn}${delBtn}</div></td>
+    <td><div class="row-actions">${editBtn}${dupeBtn}${unmatchBtn}${delBtn}</div></td>
   </tr>`;
 }
 
@@ -1557,6 +1560,20 @@ function openEditTxn(id) {
   document.getElementById('txn-notes').value = t.notes || '';
   document.getElementById('add-txn-error').style.display = 'none';
   document.getElementById('add-txn-modal').classList.remove('hidden');
+}
+function openDupeTxn(id) {
+  const t = cfAllTxns.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('add-txn-title').textContent = 'Add Transaction';
+  document.getElementById('edit-txn-id').value = '';
+  document.getElementById('txn-date').value = todayIso();
+  document.getElementById('txn-desc').value = t.description;
+  document.getElementById('txn-amount').value = t.amount.toFixed(2);
+  document.getElementById('txn-notes').value = '';
+  document.getElementById('add-txn-error').style.display = 'none';
+  document.getElementById('add-txn-modal').classList.remove('hidden');
+  if (!_descAutocompleteSetup) { _setupDescAutocomplete(); _descAutocompleteSetup = true; }
+  setTimeout(() => document.getElementById('txn-date').focus(), 50);
 }
 function closeAddTxn() { document.getElementById('add-txn-modal').classList.add('hidden'); }
 

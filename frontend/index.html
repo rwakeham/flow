@@ -234,10 +234,10 @@ button:hover { background: var(--surface2); }
 .balance-forecast::before { content: '~'; font-size: 10px; }
 .cutoff-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; color: var(--text-muted); padding: 6px 10px; }
 .cutoff-row .cutoff-bal { font-weight: 700; color: var(--text); font-size: 13px; }
-.date-balance-row td { padding: 3px 10px; border-bottom: 1px solid var(--border); }
+.date-balance-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; padding: 6px 10px; }
 .date-balance-amt { font-weight: 700; font-size: 13px; }
-.date-balance-verified .date-balance-amt { color: var(--green); }
-.date-balance-forecast .date-balance-amt { color: var(--text-muted); font-style: italic; }
+.date-balance-verified { color: var(--green); }
+.date-balance-forecast { color: var(--text-muted); font-style: italic; }
 /* ── Pagination ── */
 .reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .reg-pagination button { padding: 3px 10px; font-size: 12px; }
@@ -499,7 +499,9 @@ button:hover { background: var(--surface2); }
   <div id="register-view">
     <div class="register-wrap">
       <div class="reg-filter-bar" id="reg-filter-bar" style="display:none">
-        <input type="text" id="reg-search" placeholder="Search description…" oninput="cfApplyFilter()">
+        <input type="text" id="reg-search" placeholder="Search description, amount…" oninput="cfApplyFilter()">
+        <input type="number" id="reg-min-credit" placeholder="Min credit $" step="0.01" min="0" oninput="cfApplyFilter()" style="width:120px">
+        <input type="number" id="reg-min-debit" placeholder="Min debit $" step="0.01" min="0" oninput="cfApplyFilter()" style="width:120px">
         <select id="reg-rec-filter" onchange="cfApplyFilter()">
           <option value="all">All</option>
           <option value="reconciled">Reconciled</option>
@@ -511,11 +513,11 @@ button:hover { background: var(--surface2); }
       <table class="register-table">
         <thead>
           <tr id="reg-thead-row">
-            <th class="sortable" style="width:100px" data-col="date" onclick="cfSetSort('date')">Date</th>
-            <th class="sortable" data-col="description" onclick="cfSetSort('description')">Description</th>
-            <th class="sortable num" style="width:120px" data-col="credit" onclick="cfSetSort('credit')">Credit</th>
-            <th class="sortable num" style="width:120px" data-col="debit" onclick="cfSetSort('debit')">Debit</th>
-            <th class="sortable" style="width:40px" data-col="reconciled" onclick="cfSetSort('reconciled')">✓</th>
+            <th style="width:100px">Date</th>
+            <th>Description</th>
+            <th class="num" style="width:120px">Credit</th>
+            <th class="num" style="width:120px">Debit</th>
+            <th style="width:40px">✓</th>
             <th style="width:80px"></th>
           </tr>
         </thead>
@@ -982,8 +984,6 @@ let cfAllTxns    = [];        // all transactions for current account (ascending
 let cfBalances   = {forecast_balance: 0, verified_balance: 0};
 let cfReconciling = false;
 // Sort / filter / pagination state
-let cfSortCol  = 'date';
-let cfSortDir  = 'desc';
 let cfFilterText = '';
 let cfFilterRec  = 'all';   // 'all' | 'reconciled' | 'unreconciled'
 let cfPage     = 1;
@@ -1036,6 +1036,8 @@ async function cfLoadAccounts() {
 function cfSelectAccount(val) {
   cfCurrentId = val ? parseInt(val) : null;
   cfPage = 1; cfFilterText = ''; cfFilterRec = 'all';
+  document.getElementById('reg-min-credit').value = '';
+  document.getElementById('reg-min-debit').value = '';
   cfUpdateToolbar();
   if (cfCurrentId) cfLoadTxns();
   else { cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null}; renderRegister(); }
@@ -1210,17 +1212,6 @@ async function cfLoadTxns() {
 }
 
 // ── Sort / filter helpers ──────────────────────────────────────────────────────
-function cfSetSort(col) {
-  if (cfSortCol === col) {
-    cfSortDir = cfSortDir === 'asc' ? 'desc' : 'asc';
-  } else {
-    cfSortCol = col;
-    cfSortDir = col === 'date' ? 'desc' : 'asc';
-  }
-  cfPage = 1;
-  renderRegister();
-}
-
 function cfApplyFilter() {
   cfFilterText = document.getElementById('reg-search').value.trim().toLowerCase();
   cfFilterRec  = document.getElementById('reg-rec-filter').value;
@@ -1232,6 +1223,8 @@ function cfClearFilter() {
   document.getElementById('reg-search').value = '';
   document.getElementById('reg-rec-filter').value = 'all';
   cfFilterText = ''; cfFilterRec = 'all';
+  document.getElementById('reg-min-credit').value = '';
+  document.getElementById('reg-min-debit').value = '';
   cfPage = 1;
   renderRegister();
 }
@@ -1260,37 +1253,31 @@ function buildGroups(txns) {
 }
 
 function filterGroups(groups) {
+  const minCredit = parseFloat(document.getElementById('reg-min-credit').value) || null;
+  const minDebit  = parseFloat(document.getElementById('reg-min-debit').value)  || null;
   return groups.filter(g => {
     const t = g.primary;
-    // Reconciled filter
     if (cfFilterRec === 'reconciled'   && !t.is_reconciled) return false;
     if (cfFilterRec === 'unreconciled' &&  t.is_reconciled) return false;
-    // Text search across description + bank_description
     if (cfFilterText) {
+      const amt = Math.abs(t.amount).toFixed(2);
       const haystack = ((t.description || '') + ' ' + (t.bank_description || '') + ' ' +
-                        (g.bank ? g.bank.bank_description || '' : '')).toLowerCase();
+                        (g.bank ? g.bank.bank_description || '' : '') + ' ' + amt).toLowerCase();
       if (!haystack.includes(cfFilterText)) return false;
     }
+    if (minCredit !== null && !(t.amount > 0 && t.amount >= minCredit)) return false;
+    if (minDebit  !== null && !(t.amount < 0 && -t.amount >= minDebit))  return false;
     return true;
   });
 }
 
 function sortGroups(groups) {
+  // Always date descending, then by created_at/id for stable same-day order
   return [...groups].sort((a, b) => {
     const ta = a.primary, tb = b.primary;
-    let va, vb;
-    switch (cfSortCol) {
-      case 'date':        va = ta.date; vb = tb.date; break;
-      case 'description': va = (ta.description||'').toLowerCase(); vb = (tb.description||'').toLowerCase(); break;
-      case 'credit':      va = ta.amount > 0 ? ta.amount : 0; vb = tb.amount > 0 ? tb.amount : 0; break;
-      case 'debit':       va = ta.amount < 0 ? -ta.amount : 0; vb = tb.amount < 0 ? -tb.amount : 0; break;
-      case 'reconciled':  va = ta.is_reconciled ? 1 : 0; vb = tb.is_reconciled ? 1 : 0; break;
-      default:            va = ta.date; vb = tb.date;
-    }
-    if (va < vb) return cfSortDir === 'asc' ? -1 : 1;
-    if (va > vb) return cfSortDir === 'asc' ?  1 : -1;
-    // Secondary sort: date desc for stable ordering
-    return ta.date > tb.date ? -1 : 1;
+    if (ta.date > tb.date) return -1;
+    if (ta.date < tb.date) return  1;
+    return (tb.id || 0) - (ta.id || 0);
   });
 }
 
@@ -1324,14 +1311,10 @@ function renderRegister() {
   const start = (cfPage - 1) * CF_PER_PAGE;
   const pageGroups = sortedGroups.slice(start, start + CF_PER_PAGE);
 
-  // Update column header sort indicators
-  document.querySelectorAll('#reg-thead-row th.sortable').forEach(th => {
-    th.classList.remove('sort-asc', 'sort-desc');
-    if (th.dataset.col === cfSortCol) th.classList.add('sort-' + cfSortDir);
-  });
-
   // Update filter controls
-  const hasFilter = cfFilterText || cfFilterRec !== 'all';
+  const minCredit = parseFloat(document.getElementById('reg-min-credit').value) || null;
+  const minDebit  = parseFloat(document.getElementById('reg-min-debit').value)  || null;
+  const hasFilter = cfFilterText || cfFilterRec !== 'all' || minCredit || minDebit;
   document.getElementById('reg-clear-filter').style.display = hasFilter ? '' : 'none';
   document.getElementById('reg-filter-count').textContent =
     hasFilter ? `${filteredGroups.length} of ${allGroups.length} shown` : `${total} transactions`;
@@ -1346,23 +1329,22 @@ function renderRegister() {
     pagination.style.display = 'none';
   }
 
-  // Build end-of-day balance map from cfAllTxns (backend chronological order).
-  // The last balance value per date in ascending order = balance after all that day's txns.
+  // Build end-of-day balance map from cfAllTxns (backend ascending order).
   const endOfDayBal = {};
   for (const t of cfAllTxns) {
     if (t.balance !== undefined) endOfDayBal[t.date] = t.balance;
   }
 
   const unmatchedManual = cfAllTxns.filter(t => t.source === 'manual' && !t.matched_to_id && !t.is_reconciled);
-  const sortingByDate = cfSortCol === 'date';
 
+  // Sorted date-desc: balance row appears BEFORE each date group (shows the day total above its transactions)
   let html = '';
   let prevDate = null;
   for (const g of pageGroups) {
     const date = g.primary.date;
-    // When the date changes, emit a balance row for the previous date group
-    if (sortingByDate && prevDate && date !== prevDate && endOfDayBal[prevDate] !== undefined) {
-      html += renderDateBalanceRow(prevDate, endOfDayBal[prevDate]);
+    if (date !== prevDate) {
+      if (endOfDayBal[date] !== undefined) html += renderDateBalanceRow(date, endOfDayBal[date]);
+      prevDate = date;
     }
     if (g.isBank) {
       html += renderBankUnmatchedRow(g.primary, unmatchedManual);
@@ -1370,11 +1352,6 @@ function renderRegister() {
       html += renderManualRow(g.primary);
       if (g.bank) html += renderBankSubRow(g.bank);
     }
-    prevDate = date;
-  }
-  // Balance row after the last date group
-  if (sortingByDate && prevDate && endOfDayBal[prevDate] !== undefined) {
-    html += renderDateBalanceRow(prevDate, endOfDayBal[prevDate]);
   }
   tbody.innerHTML = html;
 
@@ -1392,14 +1369,13 @@ function renderRegister() {
 }
 
 function renderDateBalanceRow(date, balance) {
-  // Determine if this balance is "verified" (all txns on this date are reconciled)
   const dayTxns = cfAllTxns.filter(t => t.date === date && t.source === 'manual');
   const allReconciled = dayTxns.length > 0 && dayTxns.every(t => t.is_reconciled);
-  const cls = allReconciled ? 'date-balance-row date-balance-verified' : 'date-balance-row date-balance-forecast';
-  return `<tr class="${cls}">
-    <td></td>
-    <td colspan="2"></td>
-    <td class="num date-balance-amt">${fmtFull(balance)}</td>
+  const balCls = allReconciled ? 'date-balance-verified' : 'date-balance-forecast';
+  return `<tr class="date-balance-row">
+    <td>${cfFmtDate(date)}</td>
+    <td colspan="2" style="font-style:italic;font-size:12px;color:var(--text-muted)">Balance</td>
+    <td class="num date-balance-amt ${balCls}">${fmtFull(balance)}</td>
     <td colspan="2"></td>
   </tr>`;
 }

@@ -241,6 +241,7 @@ button:hover { background: var(--surface2); }
 .date-balance-amt { font-weight: 700; font-size: 13px; color: var(--text); }
 .date-balance-verified { }
 .date-balance-forecast { font-style: italic; }
+.today-marker-row td { background: color-mix(in srgb, var(--accent) 12%, var(--surface2)); border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); font-size: 12px; padding: 6px 10px; color: var(--accent); }
 /* ── Pagination ── */
 .reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .reg-pagination button { padding: 3px 10px; font-size: 12px; }
@@ -352,6 +353,11 @@ button:hover { background: var(--surface2); }
           <input type="checkbox" id="mgmt-clear-cutoff"> Clear cutoff (revert to opening balance)
         </label>
       </div>
+    </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+      <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="mgmt-is-default"> Set as default account (auto-selected on open)
+      </label>
     </div>
     <div id="mgmt-error" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
     <div class="modal-footer" style="margin-top:14px">
@@ -1089,9 +1095,9 @@ async function cfLoadAccounts() {
     cfAccounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
   if (prev && cfAccounts.find(a => a.id === prev)) {
     sel.value = prev;
-  } else if (cfAccounts.length === 1) {
-    sel.value = cfAccounts[0].id;
-    cfCurrentId = cfAccounts[0].id;
+  } else if (!prev) {
+    const defAcct = cfAccounts.find(a => a.is_default) || (cfAccounts.length === 1 ? cfAccounts[0] : null);
+    if (defAcct) { sel.value = defAcct.id; cfCurrentId = defAcct.id; }
   }
   if (cfCurrentId) cfLoadTxns();
   cfUpdateToolbar();
@@ -1201,6 +1207,7 @@ function openMgmtAcct() {
   document.getElementById('mgmt-cutoff-date').value = acct.cutoff_date || '';
   document.getElementById('mgmt-cutoff-balance').value = acct.cutoff_balance != null ? acct.cutoff_balance.toFixed(2) : '';
   document.getElementById('mgmt-clear-cutoff').checked = false;
+  document.getElementById('mgmt-is-default').checked = !!acct.is_default;
   document.getElementById('mgmt-error').style.display = 'none';
   document.getElementById('manage-acct-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('mgmt-name').focus(), 50);
@@ -1216,6 +1223,7 @@ async function doSaveMgmtAcct() {
   const cutoffDateRaw = document.getElementById('mgmt-cutoff-date').value;
   const cutoffBalRaw = document.getElementById('mgmt-cutoff-balance').value.trim();
   const clearCutoff = document.getElementById('mgmt-clear-cutoff').checked;
+  const isDefault = document.getElementById('mgmt-is-default').checked;
   const errEl = document.getElementById('mgmt-error');
 
   if (!name) {
@@ -1224,7 +1232,7 @@ async function doSaveMgmtAcct() {
     return;
   }
 
-  const body = { name, notes: notes || null, clear_cutoff: clearCutoff };
+  const body = { name, notes: notes || null, clear_cutoff: clearCutoff, is_default: isDefault };
 
   if (!clearCutoff && cutoffDateRaw) {
     const bal = cutoffBalRaw ? parseFloat(cutoffBalRaw.replace(/[$,\s]/g, '')) : null;
@@ -1454,11 +1462,26 @@ function renderRegister() {
 
   const unmatchedManual = cfAllTxns.filter(t => t.source === 'manual' && !t.matched_to_id && !t.is_reconciled);
 
+  // Compute today's balance for the "today" marker row.
+  // Find the latest date in endOfDayBal that is <= today, then use that balance.
+  const todayStr = todayIso();
+  const balDates = Object.keys(endOfDayBal).sort();
+  let todayBalance = null;
+  for (const d of balDates) {
+    if (d <= todayStr) todayBalance = endOfDayBal[d];
+  }
+
   // Sorted date-desc: balance row appears BEFORE each date group (shows the day total above its transactions)
   let html = '';
   let prevDate = null;
+  let todayInserted = false;
   for (const g of pageGroups) {
     const date = g.primary.date;
+    // Insert "today" marker row when we cross from future into past (on the last page showing it)
+    if (!todayInserted && date < todayStr) {
+      if (todayBalance !== null) html += renderTodayRow(todayStr, todayBalance);
+      todayInserted = true;
+    }
     if (date !== prevDate) {
       if (endOfDayBal[date] !== undefined) html += renderDateBalanceRow(date, endOfDayBal[date]);
       prevDate = date;
@@ -1469,6 +1492,10 @@ function renderRegister() {
       html += renderManualRow(g.primary);
       if (g.bank) html += renderBankSubRow(g.bank);
     }
+  }
+  // If all transactions on this page are future (or there are none past today yet), append at bottom
+  if (!todayInserted && todayBalance !== null) {
+    html += renderTodayRow(todayStr, todayBalance);
   }
   tbody.innerHTML = html;
 
@@ -1495,6 +1522,17 @@ function renderDateBalanceRow(date, balance) {
     <td style="font-style:italic;font-size:12px;color:var(--text-muted)">Balance</td>
     <td></td>
     <td class="num date-balance-amt ${balCls}">${fmtFull(balance)}</td>
+    <td></td>
+    <td></td>
+  </tr>`;
+}
+
+function renderTodayRow(date, balance) {
+  return `<tr class="today-marker-row">
+    <td style="font-weight:600;white-space:nowrap">${cfFmtDate(date)}</td>
+    <td style="font-weight:600;font-size:12px">Today</td>
+    <td></td>
+    <td class="num" style="font-weight:700">${fmtFull(balance)}</td>
     <td></td>
     <td></td>
   </tr>`;

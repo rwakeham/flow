@@ -210,8 +210,11 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    opening, _ = _effective_opening(acct)
-    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
+    opening, cutoff_date = _effective_opening(acct)
+    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
+    if cutoff_date:
+        query = query.filter(Transaction.date >= cutoff_date)
+    txns = query.all()
     return _compute_running_balance(opening, txns)
 
 

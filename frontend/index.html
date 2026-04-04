@@ -510,6 +510,11 @@ button:hover { background: var(--surface2); }
         <button class="btn-sm" onclick="cfClearFilter()" id="reg-clear-filter" style="display:none">✕ Clear</button>
         <span class="filter-count" id="reg-filter-count"></span>
       </div>
+      <div class="reg-pagination" id="reg-pagination-top" style="display:none">
+        <button id="reg-prev-top" onclick="cfChangePage(-1)">‹ Prev</button>
+        <span class="page-info" id="reg-page-info-top"></span>
+        <button id="reg-next-top" onclick="cfChangePage(1)">Next ›</button>
+      </div>
       <table class="register-table">
         <thead>
           <tr id="reg-thead-row">
@@ -1193,6 +1198,7 @@ async function doAddRAcct() {
 // ── Load & render transactions ────────────────────────────────────────────────
 async function cfLoadTxns() {
   if (!cfCurrentId) return;
+  cfPage = 1;
   const res = await fetch(`/api/register/${cfCurrentId}/transactions`);
   if (!res.ok) return;
   const data = await res.json();
@@ -1319,14 +1325,21 @@ function renderRegister() {
   document.getElementById('reg-filter-count').textContent =
     hasFilter ? `${filteredGroups.length} of ${allGroups.length} shown` : `${total} transactions`;
 
-  // Pagination controls
+  // Pagination controls — sync top and bottom bars
+  const paginationTop = document.getElementById('reg-pagination-top');
   if (totalPages > 1) {
     pagination.style.display = '';
-    document.getElementById('reg-page-info').textContent = `Page ${cfPage} of ${totalPages} (${total} rows)`;
+    paginationTop.style.display = '';
+    const pageInfo = `Page ${cfPage} of ${totalPages} (${total} rows)`;
+    document.getElementById('reg-page-info').textContent = pageInfo;
+    document.getElementById('reg-page-info-top').textContent = pageInfo;
     document.getElementById('reg-prev').disabled = cfPage === 1;
     document.getElementById('reg-next').disabled = cfPage === totalPages;
+    document.getElementById('reg-prev-top').disabled = cfPage === 1;
+    document.getElementById('reg-next-top').disabled = cfPage === totalPages;
   } else {
     pagination.style.display = 'none';
+    paginationTop.style.display = 'none';
   }
 
   // Build end-of-day balance map from cfAllTxns (backend ascending order).

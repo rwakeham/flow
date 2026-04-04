@@ -234,6 +234,10 @@ button:hover { background: var(--surface2); }
 .balance-forecast::before { content: '~'; font-size: 10px; }
 .cutoff-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; color: var(--text-muted); padding: 6px 10px; }
 .cutoff-row .cutoff-bal { font-weight: 700; color: var(--text); font-size: 13px; }
+.date-balance-row td { padding: 3px 10px; border-bottom: 1px solid var(--border); }
+.date-balance-amt { font-weight: 700; font-size: 13px; }
+.date-balance-verified .date-balance-amt { color: var(--green); }
+.date-balance-forecast .date-balance-amt { color: var(--text-muted); font-style: italic; }
 /* ── Pagination ── */
 .reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .reg-pagination button { padding: 3px 10px; font-size: 12px; }
@@ -511,7 +515,6 @@ button:hover { background: var(--surface2); }
             <th class="sortable" data-col="description" onclick="cfSetSort('description')">Description</th>
             <th class="sortable num" style="width:120px" data-col="credit" onclick="cfSetSort('credit')">Credit</th>
             <th class="sortable num" style="width:120px" data-col="debit" onclick="cfSetSort('debit')">Debit</th>
-            <th class="sortable num" style="width:120px" data-col="balance" onclick="cfSetSort('balance')">Balance</th>
             <th class="sortable" style="width:40px" data-col="reconciled" onclick="cfSetSort('reconciled')">✓</th>
             <th style="width:80px"></th>
           </tr>
@@ -1281,7 +1284,6 @@ function sortGroups(groups) {
       case 'description': va = (ta.description||'').toLowerCase(); vb = (tb.description||'').toLowerCase(); break;
       case 'credit':      va = ta.amount > 0 ? ta.amount : 0; vb = tb.amount > 0 ? tb.amount : 0; break;
       case 'debit':       va = ta.amount < 0 ? -ta.amount : 0; vb = tb.amount < 0 ? -tb.amount : 0; break;
-      case 'balance':     va = ta.balance ?? -Infinity; vb = tb.balance ?? -Infinity; break;
       case 'reconciled':  va = ta.is_reconciled ? 1 : 0; vb = tb.is_reconciled ? 1 : 0; break;
       default:            va = ta.date; vb = tb.date;
     }
@@ -1300,7 +1302,7 @@ function renderRegister() {
   const tfoot = document.getElementById('register-tfoot');
   if (!cfCurrentId) {
     filterBar.style.display = 'none'; pagination.style.display = 'none';
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
     tfoot.innerHTML = '';
     return;
   }
@@ -1308,7 +1310,7 @@ function renderRegister() {
 
   if (!cfAllTxns.length) {
     pagination.style.display = 'none';
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
     return;
   }
 
@@ -1344,44 +1346,67 @@ function renderRegister() {
     pagination.style.display = 'none';
   }
 
-  // Render rows
-  // Also show unmatched bank txns from cfAllTxns that aren't in this page's groups
-  // (they are included in allGroups naturally)
+  // Build end-of-day balance map from cfAllTxns (backend chronological order).
+  // The last balance value per date in ascending order = balance after all that day's txns.
+  const endOfDayBal = {};
+  for (const t of cfAllTxns) {
+    if (t.balance !== undefined) endOfDayBal[t.date] = t.balance;
+  }
+
   const unmatchedManual = cfAllTxns.filter(t => t.source === 'manual' && !t.matched_to_id && !t.is_reconciled);
+  const sortingByDate = cfSortCol === 'date';
 
   let html = '';
+  let prevDate = null;
   for (const g of pageGroups) {
+    const date = g.primary.date;
+    // When the date changes, emit a balance row for the previous date group
+    if (sortingByDate && prevDate && date !== prevDate && endOfDayBal[prevDate] !== undefined) {
+      html += renderDateBalanceRow(prevDate, endOfDayBal[prevDate]);
+    }
     if (g.isBank) {
       html += renderBankUnmatchedRow(g.primary, unmatchedManual);
     } else {
       html += renderManualRow(g.primary);
       if (g.bank) html += renderBankSubRow(g.bank);
     }
+    prevDate = date;
+  }
+  // Balance row after the last date group
+  if (sortingByDate && prevDate && endOfDayBal[prevDate] !== undefined) {
+    html += renderDateBalanceRow(prevDate, endOfDayBal[prevDate]);
   }
   tbody.innerHTML = html;
 
-  // Cutoff balance marker — shown in tfoot so it's always below all transactions
+  // Cutoff balance marker — always in tfoot below all rows
   if (cfBalances.cutoff_date && cfBalances.cutoff_balance != null) {
     tfoot.innerHTML = `<tr class="cutoff-row">
       <td>${cfFmtDate(cfBalances.cutoff_date)}</td>
-      <td colspan="3" style="font-style:italic">Balance override — transactions before this date are hidden</td>
-      <td class="num"><span class="cutoff-bal">${fmtFull(cfBalances.cutoff_balance)}</span></td>
-      <td></td><td></td>
+      <td colspan="2" style="font-style:italic">Balance override — transactions before this date are hidden</td>
+      <td colspan="2" class="num"><span class="cutoff-bal">${fmtFull(cfBalances.cutoff_balance)}</span></td>
+      <td></td>
     </tr>`;
   } else {
     tfoot.innerHTML = '';
   }
 }
 
+function renderDateBalanceRow(date, balance) {
+  // Determine if this balance is "verified" (all txns on this date are reconciled)
+  const dayTxns = cfAllTxns.filter(t => t.date === date && t.source === 'manual');
+  const allReconciled = dayTxns.length > 0 && dayTxns.every(t => t.is_reconciled);
+  const cls = allReconciled ? 'date-balance-row date-balance-verified' : 'date-balance-row date-balance-forecast';
+  return `<tr class="${cls}">
+    <td></td>
+    <td colspan="2"></td>
+    <td class="num date-balance-amt">${fmtFull(balance)}</td>
+    <td colspan="2"></td>
+  </tr>`;
+}
+
 function renderManualRow(t) {
   const credit = t.amount > 0 ? fmtFull(t.amount) : '';
   const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
-  // Balance: green/normal when reconciled (verified), muted+italic when forecast
-  const balHtml = t.balance !== undefined
-    ? `<span class="${t.is_reconciled ? 'balance-cell' : 'balance-cell balance-forecast'}"
-         title="${t.is_reconciled ? 'Verified balance' : 'Forecast balance (unreconciled)'}"
-       >${fmtFull(t.balance)}</span>`
-    : '';
   const recIcon    = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
   const editBtn    = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
   const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
@@ -1393,7 +1418,6 @@ function renderManualRow(t) {
     <td>${escHtml(t.description)}${t.notes ? `<br><span class="bank-desc">${escHtml(t.notes)}</span>` : ''}</td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
-    <td class="num">${balHtml}</td>
     <td>${recIcon}</td>
     <td><div class="row-actions">${editBtn}${unmatchBtn}${delBtn}</div></td>
   </tr>`;
@@ -1402,10 +1426,10 @@ function renderManualRow(t) {
 function renderBankSubRow(t) {
   if (!cfShowBankSubs) return '';
   return `<tr class="row-bank-sub" data-id="${t.id}">
-    <td colspan="4" style="padding-left:28px">
+    <td colspan="3" style="padding-left:28px">
       <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>
     </td>
-    <td class="num"><span class="balance-cell" style="color:var(--text-muted);font-size:11px" title="Bank confirmed">${t.balance !== undefined ? fmtFull(t.balance) : ''}</span></td>
+    <td></td>
     <td><span class="rec-check">✓</span></td>
     <td><button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button></td>
   </tr>`;
@@ -1467,7 +1491,6 @@ function renderBankUnmatchedRow(t, unmatchedManual) {
     </td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
-    <td class="num"><span class="balance-cell balance-forecast" title="Projected balance (unmatched bank transaction)">${t.balance !== undefined ? fmtFull(t.balance) : ''}</span></td>
     <td><span class="rec-none">?</span></td>
     <td><button class="btn-sm" onclick="doDeleteTxn(${t.id})" style="color:var(--red)" title="Delete">✕</button></td>
   </tr>`;

@@ -6,6 +6,7 @@ All routes are prefixed /api/register and require authentication.
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date as DateType
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -115,6 +116,76 @@ def _effective_opening(acct: RegisterAccount) -> tuple[float, "DateType | None"]
     if acct.cutoff_date is not None and acct.cutoff_balance is not None:
         return float(acct.cutoff_balance), acct.cutoff_date
     return float(acct.opening_balance), None
+
+
+@router.get("/accounts/timeseries")
+def register_accounts_timeseries(db: Session = Depends(get_db)):
+    """
+    Return month-end balances for every register account, derived from transactions.
+    Used by the dashboard to include cash accounts in charts and asset allocation.
+    """
+    accounts = db.query(RegisterAccount).order_by(RegisterAccount.id).all()
+    if not accounts:
+        return {"periods": [], "accounts": []}
+
+    all_period_set: set[str] = set()
+    result_accounts = []
+
+    for acct in accounts:
+        opening, cutoff_date = _effective_opening(acct)
+
+        txns = (
+            db.query(Transaction)
+            .filter(Transaction.register_account_id == acct.id)
+            .order_by(Transaction.date)
+            .all()
+        )
+
+        # Same counting logic as _compute_running_balance:
+        # manual rows always count; bank rows only if unmatched
+        qualifying = [
+            t for t in txns
+            if t.source == "manual" or (t.source == "bank" and t.matched_to_id is None)
+        ]
+        if cutoff_date:
+            qualifying = [t for t in qualifying if t.date >= cutoff_date]
+
+        if not qualifying:
+            # Still emit the account with current balance for the latest period
+            continue
+
+        # Compute balance at end of each month that has transactions
+        months = sorted({(t.date.year, t.date.month) for t in qualifying})
+        running = opening
+        txn_idx = 0
+        period_balances: dict[str, float] = {}
+
+        for year, month in months:
+            last_day = monthrange(year, month)[1]
+            month_end = DateType(year, month, last_day)
+            while txn_idx < len(qualifying) and qualifying[txn_idx].date <= month_end:
+                running += float(qualifying[txn_idx].amount)
+                txn_idx += 1
+            key = month_end.isoformat()
+            period_balances[key] = running
+            all_period_set.add(key)
+
+        result_accounts.append({"id": acct.id, "name": acct.name, "period_balances": period_balances})
+
+    periods = sorted(all_period_set)
+
+    # Convert period_balances dict → values array, forward-filling missing months
+    for acct in result_accounts:
+        pb = acct.pop("period_balances")
+        last_val: float | None = None
+        values = []
+        for p in periods:
+            if p in pb:
+                last_val = pb[p]
+            values.append(last_val)
+        acct["values"] = values
+
+    return {"periods": periods, "accounts": result_accounts}
 
 
 @router.get("/accounts")

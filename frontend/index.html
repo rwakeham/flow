@@ -1441,11 +1441,14 @@ function renderDateBalanceRow(date, balance) {
   const dayTxns = cfAllTxns.filter(t => t.date === date && t.source === 'manual');
   const allReconciled = dayTxns.length > 0 && dayTxns.every(t => t.is_reconciled);
   const balCls = allReconciled ? 'date-balance-verified' : 'date-balance-forecast';
+  // Use one td per column (no colspan) so border-collapse renders the top border evenly
   return `<tr class="date-balance-row">
     <td>${cfFmtDate(date)}</td>
-    <td colspan="2" style="font-style:italic;font-size:12px;color:var(--text-muted)">Balance</td>
+    <td style="font-style:italic;font-size:12px;color:var(--text-muted)">Balance</td>
+    <td></td>
     <td class="num date-balance-amt ${balCls}">${fmtFull(balance)}</td>
-    <td colspan="2"></td>
+    <td></td>
+    <td></td>
   </tr>`;
 }
 

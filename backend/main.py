@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from sqlalchemy import text
@@ -58,6 +59,7 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(data.router)
 app.include_router(register.router)
+app.mount("/static", StaticFiles(directory="/app/frontend/static"), name="static")
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────

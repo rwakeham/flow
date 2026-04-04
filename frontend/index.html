@@ -67,6 +67,7 @@ button:hover { background: var(--surface2); }
   display: flex; align-items: center; padding: 0 24px; height: 52px; gap: 12px;
 }
 #topbar h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
+#topbar .logo { height: 36px; width: auto; flex: 1; object-fit: contain; object-position: left; }
 #topbar .spacer { flex: 1; }
 
 /* ── Layout ── */
@@ -378,7 +379,7 @@ button:hover { background: var(--surface2); }
 
 <!-- Top bar -->
 <div id="topbar">
-  <h1>flow</h1>
+  <img src="/static/logo.png" alt="Flow" class="logo">
   <div class="section-nav">
     <button class="section-btn active" id="nav-dashboard" onclick="showSection('dashboard')">Dashboard</button>
     <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>

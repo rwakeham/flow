@@ -80,27 +80,47 @@ class RegisterAccountCreate(BaseModel):
     opening_balance: float = 0.0
 
 
+class RegisterAccountUpdate(BaseModel):
+    name: str | None = None
+    notes: str | None = None
+    cutoff_date: DateType | None = None
+    cutoff_balance: float | None = None
+    clear_cutoff: bool = False  # explicitly clear the cutoff when True
+
+
+def _acct_dict(acct: RegisterAccount, current_balance: float) -> dict:
+    return {
+        "id": acct.id,
+        "name": acct.name,
+        "opening_balance": float(acct.opening_balance),
+        "notes": acct.notes,
+        "cutoff_date": acct.cutoff_date.isoformat() if acct.cutoff_date else None,
+        "cutoff_balance": float(acct.cutoff_balance) if acct.cutoff_balance is not None else None,
+        "current_balance": round(current_balance, 2),
+    }
+
+
+def _effective_opening(acct: RegisterAccount) -> tuple[float, "DateType | None"]:
+    """Return (starting_balance, cutoff_date_or_None) for running-balance calculations."""
+    if acct.cutoff_date is not None and acct.cutoff_balance is not None:
+        return float(acct.cutoff_balance), acct.cutoff_date
+    return float(acct.opening_balance), None
+
+
 @router.get("/accounts")
 def list_register_accounts(db: Session = Depends(get_db)):
     accounts = db.query(RegisterAccount).order_by(RegisterAccount.id).all()
     result = []
     for acct in accounts:
-        # Compute current balance = opening + sum of manual transaction amounts
-        row = db.execute(
-            text("""
-                SELECT COALESCE(SUM(amount), 0)
-                FROM transactions
-                WHERE register_account_id = :aid AND source = 'manual'
-            """),
-            {"aid": acct.id},
-        ).scalar()
-        current_balance = float(acct.opening_balance) + float(row)
-        result.append({
-            "id": acct.id,
-            "name": acct.name,
-            "opening_balance": float(acct.opening_balance),
-            "current_balance": round(current_balance, 2),
-        })
+        opening, cutoff_date = _effective_opening(acct)
+        query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE register_account_id = :aid AND source = 'manual'"
+        params: dict = {"aid": acct.id}
+        if cutoff_date:
+            query += " AND date >= :cutoff"
+            params["cutoff"] = cutoff_date
+        row = db.execute(text(query), params).scalar()
+        current_balance = opening + float(row)
+        result.append(_acct_dict(acct, current_balance))
     return result
 
 
@@ -113,7 +133,40 @@ def create_register_account(body: RegisterAccountCreate, db: Session = Depends(g
     db.add(acct)
     db.commit()
     db.refresh(acct)
-    return {"id": acct.id, "name": acct.name, "opening_balance": float(acct.opening_balance), "current_balance": float(acct.opening_balance)}
+    return _acct_dict(acct, float(acct.opening_balance))
+
+
+@router.patch("/accounts/{account_id}")
+def update_register_account(account_id: int, body: RegisterAccountUpdate, db: Session = Depends(get_db)):
+    acct = db.get(RegisterAccount, account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if body.name is not None:
+        conflict = db.query(RegisterAccount).filter(
+            RegisterAccount.name == body.name,
+            RegisterAccount.id != account_id,
+        ).first()
+        if conflict:
+            raise HTTPException(status_code=409, detail="Account name already exists")
+        acct.name = body.name
+    if body.notes is not None:
+        acct.notes = body.notes or None
+    if body.clear_cutoff:
+        acct.cutoff_date = None
+        acct.cutoff_balance = None
+    elif body.cutoff_date is not None:
+        acct.cutoff_date = body.cutoff_date
+        acct.cutoff_balance = body.cutoff_balance  # may be None if user only set date
+    db.commit()
+    db.refresh(acct)
+    opening, cutoff_date = _effective_opening(acct)
+    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE register_account_id = :aid AND source = 'manual'"
+    params: dict = {"aid": acct.id}
+    if cutoff_date:
+        query += " AND date >= :cutoff"
+        params["cutoff"] = cutoff_date
+    row = db.execute(text(query), params).scalar()
+    return _acct_dict(acct, opening + float(row))
 
 
 @router.delete("/accounts/{account_id}", status_code=204)
@@ -147,8 +200,12 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    txns = db.query(Transaction).filter(Transaction.register_account_id == account_id).all()
-    return _compute_running_balance(float(acct.opening_balance), txns)
+    opening, cutoff_date = _effective_opening(acct)
+    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
+    if cutoff_date:
+        query = query.filter(Transaction.date >= cutoff_date)
+    txns = query.all()
+    return _compute_running_balance(opening, txns)
 
 
 @router.post("/{account_id}/transactions", status_code=201)
@@ -212,6 +269,135 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_db)):
 
 # ── Import (bank export or manual ledger spreadsheet) ─────────────────────────
 
+@router.post("/{account_id}/import/check")
+async def check_import(
+    account_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Dry-run: parse the file and return what would be imported without writing anything.
+    """
+    acct = db.get(RegisterAccount, account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+
+    try:
+        result = parse_register_import(content)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+
+    if result.format == FileFormat.UNKNOWN:
+        raise HTTPException(status_code=422, detail="No transactions found in file")
+
+    _, cutoff_date = _effective_opening(acct)
+
+    if result.format == FileFormat.LEDGER:
+        would_import = 0
+        would_skip = 0
+        for row in result.ledger_rows:
+            if cutoff_date and row.date < cutoff_date:
+                would_skip += 1
+                continue
+            existing = db.execute(
+                text("""
+                    SELECT id FROM transactions
+                    WHERE register_account_id = :aid
+                      AND source = 'manual'
+                      AND date = :dt
+                      AND amount = :amt
+                      AND description = :desc
+                    LIMIT 1
+                """),
+                {"aid": account_id, "dt": row.date, "amt": float(row.amount), "desc": row.description},
+            ).fetchone()
+            if existing:
+                would_skip += 1
+            else:
+                would_import += 1
+        return {"format": "ledger", "would_import": would_import, "would_skip": would_skip}
+
+    # Bank format
+    new_rows = []
+    would_skip = 0
+    for row in result.bank_rows:
+        if cutoff_date and row.date < cutoff_date:
+            would_skip += 1
+            continue
+        # Would this be skipped as a bank duplicate?
+        bank_dupe = db.execute(
+            text("""
+                SELECT id FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'bank'
+                  AND date = :dt
+                  AND amount = :amt
+                  AND bank_description = :desc
+                LIMIT 1
+            """),
+            {"aid": account_id, "dt": row.date, "amt": row.amount, "desc": row.bank_description},
+        ).fetchone()
+        if bank_dupe:
+            would_skip += 1
+            continue
+
+        # Would this match an already-reconciled manual entry?
+        reconciled_manual = db.execute(
+            text("""
+                SELECT id FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'manual'
+                  AND date = :dt
+                  AND amount = :amt
+                  AND is_reconciled = TRUE
+                LIMIT 1
+            """),
+            {"aid": account_id, "dt": row.date, "amt": float(row.amount)},
+        ).fetchone()
+        if reconciled_manual:
+            would_skip += 1
+            continue
+
+        new_rows.append(row)
+
+    # Estimate fuzzy auto-matches for genuinely new rows
+    would_auto_match = 0
+    if new_rows:
+        unmatched_manual = db.execute(
+            text("""
+                SELECT id, date, amount, description FROM transactions
+                WHERE register_account_id = :aid
+                  AND source = 'manual'
+                  AND matched_to_id IS NULL
+                  AND is_reconciled = FALSE
+            """),
+            {"aid": account_id},
+        ).fetchall()
+        bank_infos = [
+            TxnInfo(id=i, date=r.date, amount=float(r.amount), description=r.bank_description or "")
+            for i, r in enumerate(new_rows)
+        ]
+        manual_infos = [
+            TxnInfo(id=r.id, date=r.date, amount=float(r.amount), description=r.description)
+            for r in unmatched_manual
+        ]
+        suggestions = suggest_matches(bank_infos, manual_infos)
+        would_auto_match = len(suggestions)
+
+    would_import = len(new_rows)
+    return {
+        "format": "bank",
+        "would_import": would_import,
+        "would_skip": would_skip,
+        "would_auto_match": would_auto_match,
+        "would_unmatched": would_import - would_auto_match,
+    }
+
+
 @router.post("/{account_id}/import")
 async def import_csv(
     account_id: int,
@@ -240,13 +426,14 @@ async def import_csv(
     if result.format == FileFormat.UNKNOWN:
         raise HTTPException(status_code=422, detail="No transactions found in file")
 
+    _, cutoff_date = _effective_opening(acct)
     if result.format == FileFormat.LEDGER:
-        return _import_ledger_rows(result.ledger_rows, account_id, db)
+        return _import_ledger_rows(result.ledger_rows, account_id, db, cutoff_date)
     else:
-        return _import_bank_rows(result.bank_rows, account_id, db)
+        return _import_bank_rows(result.bank_rows, account_id, db, cutoff_date)
 
 
-def _import_ledger_rows(rows, account_id: int, db) -> dict:
+def _import_ledger_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
     """
     Import rows from the user's manual tracking spreadsheet as manual transactions.
     Already-reconciled entries (X flag) are marked is_reconciled=True.
@@ -256,6 +443,9 @@ def _import_ledger_rows(rows, account_id: int, db) -> dict:
     imported = 0
     skipped = 0
     for row in rows:
+        if cutoff_date and row.date < cutoff_date:
+            skipped += 1
+            continue
         existing = db.execute(
             text("""
                 SELECT id FROM transactions
@@ -293,17 +483,16 @@ def _import_ledger_rows(rows, account_id: int, db) -> dict:
     }
 
 
-def _import_bank_rows(rows, account_id: int, db) -> dict:
+def _import_bank_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
     """
     Import rows from a bank export as bank transactions, then run auto-matching
     against any existing unmatched manual transactions.
 
     Dedup logic (in order):
       1. Skip if an identical bank row already exists (same date/amount/description).
-      2. If an already-reconciled manual entry exists with the exact same date and
-         amount (and no bank row linked yet), import the bank row and link it to
-         that manual entry immediately — handles re-importing historical data that
-         was previously reconciled from a ledger spreadsheet import.
+      2. Skip if a reconciled manual entry already covers the same date and amount —
+         the manual entry is treated as authoritative, so deleting a bank row makes
+         the skip permanent even on re-import.
       3. Otherwise import as an unmatched bank row and run fuzzy auto-matching.
     """
     imported = 0
@@ -311,6 +500,9 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
     new_bank_txns: list[Transaction] = []
 
     for row in rows:
+        if cutoff_date and row.date < cutoff_date:
+            continue
+
         # 1. Skip exact bank duplicates
         existing_bank = db.execute(
             text("""
@@ -327,8 +519,9 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
         if existing_bank:
             continue
 
-        # 2. Check for an already-reconciled manual entry with same date + amount
-        #    that hasn't been linked to a bank row yet.
+        # 2. Skip if a reconciled manual entry already covers this date + amount.
+        #    This treats the manual entry as the authoritative record and makes
+        #    deletion of bank rows permanent (they won't re-appear on re-import).
         reconciled_manual = db.execute(
             text("""
                 SELECT id FROM transactions
@@ -337,11 +530,12 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
                   AND date = :dt
                   AND amount = :amt
                   AND is_reconciled = TRUE
-                  AND matched_to_id IS NULL
                 LIMIT 1
             """),
             {"aid": account_id, "dt": row.date, "amt": float(row.amount)},
         ).fetchone()
+        if reconciled_manual:
+            continue
 
         txn = Transaction(
             register_account_id=account_id,
@@ -355,15 +549,7 @@ def _import_bank_rows(rows, account_id: int, db) -> dict:
         db.add(txn)
         db.flush()
         imported += 1
-
-        if reconciled_manual:
-            manual_txn = db.get(Transaction, reconciled_manual.id)
-            txn.matched_to_id = manual_txn.id
-            txn.is_reconciled = True
-            manual_txn.matched_to_id = txn.id
-            auto_matched += 1
-        else:
-            new_bank_txns.append(txn)
+        new_bank_txns.append(txn)
 
     if not new_bank_txns:
         db.commit()

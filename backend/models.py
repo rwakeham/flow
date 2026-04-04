@@ -35,6 +35,9 @@ class RegisterAccount(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
     opening_balance = Column(Numeric(18, 2), nullable=False, default=0)
+    notes = Column(String, nullable=True)
+    cutoff_date = Column(Date, nullable=True)       # ignore transactions before this date
+    cutoff_balance = Column(Numeric(18, 2), nullable=True)  # effective balance as of cutoff_date
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

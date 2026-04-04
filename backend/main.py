@@ -19,6 +19,15 @@ async def lifespan(app: FastAPI):
         conn.execute(text(
             "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        conn.execute(text(
+            "ALTER TABLE register_accounts ADD COLUMN IF NOT EXISTS notes TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE register_accounts ADD COLUMN IF NOT EXISTS cutoff_date DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE register_accounts ADD COLUMN IF NOT EXISTS cutoff_balance NUMERIC(18,2)"
+        ))
         conn.commit()
     yield
 

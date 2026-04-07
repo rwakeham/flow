@@ -670,9 +670,7 @@ def _import_bank_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
         manual_txn = db.get(Transaction, suggestion.manual_id)
         if bank_txn and manual_txn and bank_txn.matched_to_id is None and manual_txn.matched_to_id is None:
             bank_txn.matched_to_id = manual_txn.id
-            bank_txn.is_reconciled = True
             manual_txn.matched_to_id = bank_txn.id
-            manual_txn.is_reconciled = True
             used_manual_ids.add(suggestion.manual_id)
             auto_matched += 1
 
@@ -689,6 +687,9 @@ def get_reconcile_data(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
+    today = DateType.today()
+
+    # Only show past/present manual entries — future transactions haven't occurred yet
     unmatched_manual = (
         db.query(Transaction)
         .filter(
@@ -696,6 +697,7 @@ def get_reconcile_data(account_id: int, db: Session = Depends(get_db)):
             Transaction.source == "manual",
             Transaction.matched_to_id.is_(None),
             Transaction.is_reconciled == False,  # noqa: E712
+            Transaction.date <= today,
         )
         .order_by(Transaction.date)
         .all()
@@ -713,7 +715,35 @@ def get_reconcile_data(account_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-    # Compute suggestions
+    # Pending matches: auto-matched pairs awaiting user confirmation
+    pending_bank = (
+        db.query(Transaction)
+        .filter(
+            Transaction.register_account_id == account_id,
+            Transaction.source == "bank",
+            Transaction.matched_to_id.isnot(None),
+            Transaction.is_reconciled == False,  # noqa: E712
+        )
+        .order_by(Transaction.date)
+        .all()
+    )
+
+    pending_matches = []
+    for bank_txn in pending_bank:
+        manual_txn = db.get(Transaction, bank_txn.matched_to_id)
+        if manual_txn is None:
+            continue
+        bank_info = TxnInfo(id=bank_txn.id, date=bank_txn.date, amount=float(bank_txn.amount), description=bank_txn.bank_description or "")
+        manual_info = TxnInfo(id=manual_txn.id, date=manual_txn.date, amount=float(manual_txn.amount), description=manual_txn.description)
+        sug = suggest_matches([bank_info], [manual_info], min_score=0.0)
+        score = sug[0].score if sug else 0.0
+        pending_matches.append({
+            "bank": _txn_dict(bank_txn),
+            "manual": _txn_dict(manual_txn),
+            "score": score,
+        })
+
+    # Compute suggestions for fully unmatched bank rows
     bank_infos = [
         TxnInfo(id=t.id, date=t.date, amount=float(t.amount), description=t.bank_description or "")
         for t in unmatched_bank
@@ -734,6 +764,7 @@ def get_reconcile_data(account_id: int, db: Session = Depends(get_db)):
     return {
         "unmatched_manual": [_txn_dict(t) for t in unmatched_manual],
         "unmatched_bank": bank_out,
+        "pending_matches": pending_matches,
     }
 
 

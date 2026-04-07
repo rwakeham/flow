@@ -555,6 +555,10 @@ button:hover { background: var(--surface2); }
       <span style="font-size:13px;font-weight:600">Reconcile Transactions</span>
       <button onclick="toggleReconcile()">✕ Done Reconciling</button>
     </div>
+    <div id="rec-pending-section" style="display:none;margin-bottom:16px">
+      <div class="rec-panel-header" style="margin-bottom:8px">Auto-Matched — Pending Confirmation</div>
+      <div id="rec-pending-list"></div>
+    </div>
     <div class="reconcile-panels">
       <div class="rec-panel">
         <div class="rec-panel-header">Unmatched Ledger Entries</div>
@@ -1716,7 +1720,7 @@ async function doUnmatch(id) {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({txn_id: id})
   });
-  if (res.ok) await cfLoadTxns();
+  if (res.ok) { await cfLoadTxns(); if (cfReconciling) await renderReconcile(); }
 }
 
 // ── Manual match (from bank row dropdown) ─────────────────────────────────────
@@ -1804,7 +1808,7 @@ async function _doImportBankCommit() {
     const d = await res.json();
     closeImportBank();
     await cfLoadTxns();
-    if (d.format === 'bank' && d.unmatched > 0) {
+    if (d.format === 'bank' && (d.unmatched > 0 || d.auto_matched > 0)) {
       toggleReconcile();
     }
   } else {
@@ -1857,6 +1861,37 @@ async function renderReconcile() {
   const res = await fetch(`/api/register/${cfCurrentId}/reconcile`);
   if (!res.ok) return;
   const data = await res.json();
+
+  // Build pending auto-matches section
+  const pendingSection = document.getElementById('rec-pending-section');
+  const pendingEl = document.getElementById('rec-pending-list');
+  const pending = data.pending_matches || [];
+  if (pending.length) {
+    pendingSection.style.display = '';
+    pendingEl.innerHTML = pending.map(p => {
+      const b = p.bank, m = p.manual;
+      const pct = Math.round(p.score * 100);
+      const scoreColor = pct >= 70 ? 'var(--green)' : pct >= 40 ? 'var(--yellow, #c8a020)' : 'var(--text-muted)';
+      return `
+        <div class="rec-row" style="border-left:3px solid var(--green);padding-left:11px">
+          <div class="rec-row-top" style="margin-bottom:4px">
+            <span class="rec-row-date">${cfFmtDate(b.date)}</span>
+            <span class="rec-row-desc bank-desc">${escHtml(b.bank_description || b.description)}</span>
+            <span class="rec-row-amt ${b.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(b.amount)}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:6px">
+            <span style="color:${scoreColor};font-weight:600">${pct}% match</span>
+            <span>→ Ledger: ${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</span>
+          </div>
+          <div class="rec-actions">
+            <button class="btn-sm btn-primary" onclick="doRecConfirmPending(${b.id}, ${m.id})">✓ Confirm</button>
+            <button class="btn-sm" style="color:var(--red)" onclick="doRecRejectPending(${b.id})">✕ Reject</button>
+          </div>
+        </div>`;
+    }).join('');
+  } else {
+    pendingSection.style.display = 'none';
+  }
 
   // Build manual list
   const manualEl = document.getElementById('rec-manual-list');
@@ -1983,6 +2018,18 @@ async function doRecMatchSel(bankId) {
   const manualId = parseInt(document.getElementById(`rec-sel-${bankId}`)?.value);
   if (!manualId) { alert('Select a ledger entry to match.'); return; }
   await doRecMatch(bankId, manualId);
+}
+
+async function doRecConfirmPending(bankId, manualId) {
+  await doRecMatch(bankId, manualId);
+}
+
+async function doRecRejectPending(bankId) {
+  const res = await fetch('/api/register/reconcile/unmatch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({txn_id: bankId})
+  });
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
 }
 </script>
 </body>

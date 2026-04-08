@@ -1798,8 +1798,8 @@ function renderRegister() {
   }
   tbody.innerHTML = html;
 
-  // Cutoff balance marker — always in tfoot below all rows
-  if (cfBalances.cutoff_date && cfBalances.cutoff_balance != null) {
+  // Cutoff balance marker — only on the last page (oldest transactions)
+  if (cfBalances.cutoff_date && cfBalances.cutoff_balance != null && cfPage === totalPages) {
     tfoot.innerHTML = `<tr class="cutoff-row">
       <td>${cfFmtDate(cfBalances.cutoff_date)}</td>
       <td colspan="3" style="font-style:italic">Balance override — transactions before this date are hidden</td>

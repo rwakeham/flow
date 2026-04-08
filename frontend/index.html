@@ -1230,7 +1230,11 @@ function renderAllocChart() {
     type: 'doughnut', data: { labels, datasets: [{ data: values, backgroundColor: ASSET_COLORS, borderWidth: 1 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmt(ctx.parsed) } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => {
+        const total = ctx.chart.data.datasets[0].data.reduce((s, v) => s + v, 0);
+        const pct = total ? (ctx.parsed / total * 100).toFixed(1) : '0.0';
+        return ` ${ctx.label}: ${fmt(ctx.parsed)} (${pct}%)`;
+      }}}},
       cutout: '60%'
     }
   });
@@ -1277,7 +1281,9 @@ function renderMomChart() {
   const values = allAccts.map(a => {
     const curr = a.values[n-1] ?? 0;
     const prev = a.values[n-2] ?? 0;
-    return a.account_type === 'liability' ? -(curr - prev) : (curr - prev);
+    // For both assets and liabilities use raw delta: a less-negative liability
+    // (paying down debt) is positive/green; a more-negative one is negative/red.
+    return curr - prev;
   });
   const colors = values.map((v, i) => v >= 0 ? '#22c55e' : '#ef4444');
   destroyChart('chart-mom');

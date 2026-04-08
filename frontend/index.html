@@ -1156,8 +1156,10 @@ function deriveSeries() {
     const combined = [...new Set([...Object.keys(tsMonths), ...Object.keys(regMonths)])].sort();
     // If balance-sheet data exists, suppress register-only months that predate it —
     // mixing ledger history with no balance-sheet data produces a misleading jump.
-    const tsStart = Object.keys(tsMonths).sort()[0];
-    return tsStart ? combined.filter(ym => ym >= tsStart) : combined;
+    const tsStart  = Object.keys(tsMonths).sort()[0];
+    const todayYM  = todayIso().slice(0, 7);
+    const clipped  = tsStart ? combined.filter(ym => ym >= tsStart) : combined;
+    return clipped.filter(ym => ym <= todayYM);
   })();
   const periods   = allMonths.map(ym => tsMonths[ym] || regMonths[ym]);
   const n         = allMonths.length;

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from auth import require_auth
+from backup_service import ensure_daily_backup
 from database import get_db
 from models import Account, Balance
 from parser import parse_upload
@@ -17,6 +18,8 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
+
+    ensure_daily_backup(db)
 
     filename = file.filename or "upload.csv"
     try:

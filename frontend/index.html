@@ -244,6 +244,28 @@ button:hover { background: var(--surface2); }
 .reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .reg-pagination button { padding: 3px 10px; font-size: 12px; }
 .reg-pagination .page-info { flex: 1; text-align: center; }
+
+/* ── Backup modal ── */
+#backup-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; z-index: 500;
+}
+#backup-modal.hidden { display: none; }
+#backup-modal .modal-box { width: 800px; max-width: 95vw; max-height: 85vh; overflow-y: auto; }
+.backup-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.backup-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.backup-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.backup-table tr:last-child td { border-bottom: none; }
+.backup-table tr:hover td { background: var(--surface2); }
+.trigger-badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+.trigger-manual { background: #dbeafe; color: #1d4ed8; }
+.trigger-auto { background: #dcfce7; color: #15803d; }
+.trigger-prerestore { background: #fef3c7; color: #92400e; }
+.trigger-uploaded { background: #f3e8ff; color: #6b21a8; }
+[data-theme="dark"] .trigger-manual { background: #1e3a5f; color: #93c5fd; }
+[data-theme="dark"] .trigger-auto { background: #14532d; color: #86efac; }
+[data-theme="dark"] .trigger-prerestore { background: #451a03; color: #fcd34d; }
+[data-theme="dark"] .trigger-uploaded { background: #3b0764; color: #d8b4fe; }
 </style>
 </head>
 <body>
@@ -383,6 +405,28 @@ button:hover { background: var(--surface2); }
   </div>
 </div>
 
+<!-- Backup modal -->
+<div id="backup-modal" class="hidden">
+  <div class="modal-box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <h2 style="flex:1">Backups</h2>
+      <label style="cursor:pointer">
+        <input type="file" id="backup-upload-input" accept=".zip" style="display:none" onchange="doUploadBackup(this)">
+        <span class="btn-sm" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" onclick="document.getElementById('backup-upload-input').click()">↑ Upload</span>
+      </label>
+      <button class="btn-primary btn-sm" onclick="doCreateBackup()">+ New Backup</button>
+    </div>
+    <p>Backups are stored on the server. A backup is automatically created before the first import each day.</p>
+    <div id="backup-list-wrap">
+      <div class="empty" style="padding:30px 0">Loading…</div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;margin-top:4px">
+      <button id="backup-delete-btn" onclick="doDeleteBackups()" style="color:var(--red);border-color:var(--red);display:none">Delete Selected</button>
+      <button onclick="closeBackups()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Top bar -->
 <div id="topbar">
   <img src="/static/logo.png" alt="Flow" class="logo">
@@ -391,7 +435,7 @@ button:hover { background: var(--surface2); }
     <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>
   </div>
   <button id="theme-btn" onclick="toggleTheme()">◑</button>
-  <button onclick="doBackup()" title="Download a ZIP backup of all data">↓ Backup</button>
+  <button onclick="openBackups()">Backups</button>
   <button onclick="doLogout()">Sign out</button>
 </div>
 
@@ -638,13 +682,141 @@ async function doLogin() {
 }
 document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
-function doBackup() {
+// ── Backup modal ─────────────────────────────────────────────────────────────
+
+function openBackups() {
+  document.getElementById('backup-modal').classList.remove('hidden');
+  loadBackupList();
+}
+
+function closeBackups() {
+  document.getElementById('backup-modal').classList.add('hidden');
+}
+
+async function loadBackupList() {
+  const wrap = document.getElementById('backup-list-wrap');
+  wrap.innerHTML = '<div class="empty" style="padding:30px 0">Loading…</div>';
+  document.getElementById('backup-delete-btn').style.display = 'none';
+  const res = await fetch('/api/backups');
+  if (!res.ok) { wrap.innerHTML = '<div class="empty" style="padding:30px 0;color:var(--red)">Failed to load backups</div>'; return; }
+  const backups = await res.json();
+  if (!backups.length) {
+    wrap.innerHTML = '<div class="empty" style="padding:30px 0">No backups yet</div>';
+    return;
+  }
+  const triggerLabel = {
+    'manual': ['Manual', 'trigger-manual'],
+    'auto-pre-import': ['Auto (pre-import)', 'trigger-auto'],
+    'pre-restore': ['Auto (pre-restore)', 'trigger-prerestore'],
+    'uploaded': ['Uploaded', 'trigger-uploaded'],
+  };
+  const rows = backups.map(b => {
+    const dt = new Date(b.created_at);
+    const dateStr = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const [label, cls] = triggerLabel[b.trigger] || [b.trigger, 'trigger-manual'];
+    const size = b.size_bytes < 1024*1024
+      ? (b.size_bytes/1024).toFixed(1)+' KB'
+      : (b.size_bytes/1024/1024).toFixed(1)+' MB';
+    const t = b.tables || {};
+    const eid = CSS.escape(b.id);
+    return `<tr>
+      <td><input type="checkbox" class="backup-cb" value="${b.id}" onchange="updateBackupDeleteBtn()"></td>
+      <td style="white-space:nowrap">${dateStr}</td>
+      <td><span class="trigger-badge ${cls}">${label}</span></td>
+      <td style="text-align:right">${t.accounts||0}</td>
+      <td style="text-align:right">${t.balances||0}</td>
+      <td style="text-align:right">${t.register_accounts||0}</td>
+      <td style="text-align:right">${t.transactions||0}</td>
+      <td style="text-align:right;white-space:nowrap">${size}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-sm" onclick="doDownloadBackup('${b.id}')">↓</button>
+        <button class="btn-sm btn-primary" onclick="doRestoreBackup('${b.id}')">Restore</button>
+      </td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table class="backup-table">
+    <thead><tr>
+      <th><input type="checkbox" id="backup-select-all" onchange="toggleAllBackups(this)"></th>
+      <th>Date / Time</th><th>Trigger</th>
+      <th style="text-align:right">Accounts</th>
+      <th style="text-align:right">Balances</th>
+      <th style="text-align:right">Reg. Accounts</th>
+      <th style="text-align:right">Transactions</th>
+      <th style="text-align:right">Size</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function updateBackupDeleteBtn() {
+  const checked = document.querySelectorAll('.backup-cb:checked').length;
+  document.getElementById('backup-delete-btn').style.display = checked ? '' : 'none';
+  const all = document.querySelectorAll('.backup-cb').length;
+  const sa = document.getElementById('backup-select-all');
+  if (sa) sa.checked = checked === all && all > 0;
+}
+
+function toggleAllBackups(cb) {
+  document.querySelectorAll('.backup-cb').forEach(el => { el.checked = cb.checked; });
+  updateBackupDeleteBtn();
+}
+
+async function doCreateBackup() {
+  const btn = document.querySelector('#backup-modal button.btn-primary[onclick="doCreateBackup()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const res = await fetch('/api/backups', {method:'POST'});
+  if (btn) { btn.disabled = false; btn.textContent = '+ New Backup'; }
+  if (res.ok) loadBackupList();
+  else alert('Backup failed');
+}
+
+function doDownloadBackup(id) {
   const a = document.createElement('a');
-  a.href = '/api/backup/download';
+  a.href = `/api/backups/${encodeURIComponent(id)}/download`;
   a.download = '';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+async function doRestoreBackup(id) {
+  if (!confirm('Restore this backup? All current data will be replaced. A safety backup of the current state will be created first.')) return;
+  const res = await fetch(`/api/backups/${encodeURIComponent(id)}/restore`, {method:'POST'});
+  if (res.ok) {
+    alert('Restore complete. The page will reload.');
+    location.reload();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    alert('Restore failed: ' + (d.detail || res.status));
+  }
+}
+
+async function doDeleteBackups() {
+  const ids = [...document.querySelectorAll('.backup-cb:checked')].map(el => el.value);
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} backup(s)? This cannot be undone.`)) return;
+  const res = await fetch('/api/backups', {
+    method: 'DELETE',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ids}),
+  });
+  if (res.ok) loadBackupList();
+  else alert('Delete failed');
+}
+
+async function doUploadBackup(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/backups/upload', {method:'POST', body: fd});
+  if (res.ok) loadBackupList();
+  else {
+    const d = await res.json().catch(() => ({}));
+    alert('Upload failed: ' + (d.detail || res.status));
+  }
 }
 
 async function doLogout() {

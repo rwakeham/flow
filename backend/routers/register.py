@@ -506,7 +506,10 @@ async def import_csv(
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
 
-    ensure_daily_backup(db)
+    try:
+        ensure_daily_backup(db)
+    except Exception:
+        pass  # backup failure must never block an import
 
     try:
         result = parse_register_import(content)

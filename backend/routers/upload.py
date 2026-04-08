@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -13,12 +15,37 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Matches date values like 4/7/2026, 04-07-2026, 2026-04-07, 2026/04/07
+_DATE_VALUE_RE = re.compile(
+    r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}$"   # mm/dd/yy(yy) or dd-mm-yy(yy)
+    r"|^\d{4}[/\-]\d{1,2}[/\-]\d{1,2}$"     # yyyy-mm-dd or yyyy/mm/dd
+)
+
+
+def _first_col_is_date(content: bytes) -> bool:
+    """
+    Return True when the first non-empty column of the first non-empty row
+    contains a date *value* (e.g. '4/7/2026') rather than a label (e.g. 'date').
+
+    Bank/ledger exports have no header row — data starts immediately.
+    Balance sheets always begin with a header row whose first column is a label.
+    """
+    preview = content[:500].decode("utf-8", errors="replace")
+    has_tabs = "\t" in preview
+    for line in preview.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        first_col = (line.split("\t")[0] if has_tabs else line.split(",")[0]).strip()
+        return bool(_DATE_VALUE_RE.match(first_col))
+    return False
+
 
 @router.post("/import/detect")
 async def detect_import(file: UploadFile = File(...)):
     """
-    Auto-detect whether a file is a balance sheet (CSV/XLSX wide format) or a
-    register import (bank/ledger tab-delimited). Read-only — does not write any data.
+    Identify whether a file is a balance sheet or a bank/ledger register import.
+    Read-only — never writes data.
     """
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -27,7 +54,7 @@ async def detect_import(file: UploadFile = File(...)):
     filename = file.filename or "upload"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    # XLSX is only ever used for balance sheets
+    # XLSX is always a balance sheet
     if ext == "xlsx":
         try:
             result = parse_upload(content, filename)
@@ -37,9 +64,11 @@ async def detect_import(file: UploadFile = File(...)):
             raise HTTPException(status_code=422, detail="No data found in XLSX file")
         return {"type": "balance", "accounts": len(result.accounts), "periods": len(result.rows)}
 
-    # Tab-delimited files are exclusively bank/ledger exports
-    preview = content[:2000].decode("utf-8", errors="replace")
-    if "\t" in preview:
+    # Key heuristic: bank/ledger exports have no header row — the first row IS
+    # data, so its first column is a date value.  Balance sheets always have a
+    # named header row (e.g. "date", "Period"), so the first column is a label.
+    if _first_col_is_date(content):
+        # No header row → bank or ledger register export
         try:
             reg = parse_register_import(content)
         except Exception as exc:
@@ -49,14 +78,16 @@ async def detect_import(file: UploadFile = File(...)):
         rows = len(reg.bank_rows) if reg.format == FileFormat.BANK else len(reg.ledger_rows)
         return {"type": "register", "format": reg.format.value, "rows": rows}
 
-    # Plain CSV — try balance sheet first (wide format), then register
+    # Has a header row → try balance sheet.  Require at least one row with an
+    # actual numeric value (guards against ledger files that happen to have headers).
     try:
         bal = parse_upload(content, filename)
-        if bal.accounts and bal.rows:
+        if bal.accounts and bal.rows and any(r["values"] for r in bal.rows):
             return {"type": "balance", "accounts": len(bal.accounts), "periods": len(bal.rows)}
     except ValueError:
         pass
 
+    # Fall back to register (e.g. ledger with a header row)
     try:
         reg = parse_register_import(content)
         if reg.format != FileFormat.UNKNOWN:
@@ -78,7 +109,10 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
 
-    ensure_daily_backup(db)
+    try:
+        ensure_daily_backup(db)
+    except Exception:
+        pass  # backup failure must never block an import
 
     filename = file.filename or "upload.csv"
     try:

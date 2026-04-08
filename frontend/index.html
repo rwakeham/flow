@@ -1152,7 +1152,13 @@ function deriveSeries() {
   const regMonths = {};
   regTsData.periods.forEach(p => { const ym = p.slice(0,7); if (!regMonths[ym] || p > regMonths[ym]) regMonths[ym] = p; });
 
-  const allMonths = [...new Set([...Object.keys(tsMonths), ...Object.keys(regMonths)])].sort();
+  const allMonths = (() => {
+    const combined = [...new Set([...Object.keys(tsMonths), ...Object.keys(regMonths)])].sort();
+    // If balance-sheet data exists, suppress register-only months that predate it —
+    // mixing ledger history with no balance-sheet data produces a misleading jump.
+    const tsStart = Object.keys(tsMonths).sort()[0];
+    return tsStart ? combined.filter(ym => ym >= tsStart) : combined;
+  })();
   const periods   = allMonths.map(ym => tsMonths[ym] || regMonths[ym]);
   const n         = allMonths.length;
 

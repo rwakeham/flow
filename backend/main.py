@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from auth import clear_session_cookie, create_session_cookie, require_auth, verify_password
 from database import Base, engine
-from routers import data, upload, register
+from routers import data, upload, register, backup
 
 
 @asynccontextmanager
@@ -62,6 +62,7 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(data.router)
 app.include_router(register.router)
+app.include_router(backup.router)
 app.mount("/static", StaticFiles(directory="/app/frontend/static"), name="static")
 
 

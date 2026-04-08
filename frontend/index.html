@@ -391,6 +391,7 @@ button:hover { background: var(--surface2); }
     <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>
   </div>
   <button id="theme-btn" onclick="toggleTheme()">◑</button>
+  <button onclick="doBackup()" title="Download a ZIP backup of all data">↓ Backup</button>
   <button onclick="doLogout()">Sign out</button>
 </div>
 
@@ -636,6 +637,15 @@ async function doLogin() {
   }
 }
 document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+function doBackup() {
+  const a = document.createElement('a');
+  a.href = '/api/backup/download';
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
 
 async function doLogout() {
   await fetch('/api/auth/logout', {method:'POST'});

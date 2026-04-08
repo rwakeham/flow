@@ -1,104 +1,77 @@
-import io
-import json
-import zipfile
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import require_auth
 from database import get_db
-from models import Account, Balance, RegisterAccount, Transaction
+import backup_service
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 
 
-@router.get("/backup/download")
-def download_backup(db: Session = Depends(get_db)):
-    accounts = db.query(Account).order_by(Account.id).all()
-    balances = db.query(Balance).order_by(Balance.id).all()
-    register_accounts = db.query(RegisterAccount).order_by(RegisterAccount.id).all()
-    transactions = db.query(Transaction).order_by(Transaction.id).all()
+@router.get("/backups")
+def list_backups():
+    return backup_service.list_backups()
 
-    accounts_data = [
-        {
-            "id": a.id,
-            "name": a.name,
-            "account_type": a.account_type,
-            "override": a.override,
-            "ignored": a.ignored,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in accounts
-    ]
 
-    balances_data = [
-        {
-            "id": b.id,
-            "account_id": b.account_id,
-            "period": str(b.period),
-            "amount": str(b.amount),
-        }
-        for b in balances
-    ]
+@router.post("/backups", status_code=201)
+def create_backup(db: Session = Depends(get_db)):
+    return backup_service.create_backup(db, trigger="manual")
 
-    register_accounts_data = [
-        {
-            "id": r.id,
-            "name": r.name,
-            "opening_balance": str(r.opening_balance),
-            "notes": r.notes,
-            "cutoff_date": str(r.cutoff_date) if r.cutoff_date else None,
-            "cutoff_balance": str(r.cutoff_balance) if r.cutoff_balance else None,
-            "is_default": r.is_default,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in register_accounts
-    ]
 
-    transactions_data = [
-        {
-            "id": t.id,
-            "register_account_id": t.register_account_id,
-            "date": str(t.date),
-            "description": t.description,
-            "amount": str(t.amount),
-            "source": t.source,
-            "bank_description": t.bank_description,
-            "matched_to_id": t.matched_to_id,
-            "is_reconciled": t.is_reconciled,
-            "notes": t.notes,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        }
-        for t in transactions
-    ]
+class DeleteBackupsBody(BaseModel):
+    ids: list[str]
 
-    now = datetime.now(timezone.utc)
-    backup_info = {
-        "created_at": now.isoformat(),
-        "tables": {
-            "accounts": len(accounts_data),
-            "balances": len(balances_data),
-            "register_accounts": len(register_accounts_data),
-            "transactions": len(transactions_data),
-        },
-    }
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("backup_info.json", json.dumps(backup_info, indent=2))
-        zf.writestr("accounts.json", json.dumps(accounts_data, indent=2))
-        zf.writestr("balances.json", json.dumps(balances_data, indent=2))
-        zf.writestr("register_accounts.json", json.dumps(register_accounts_data, indent=2))
-        zf.writestr("transactions.json", json.dumps(transactions_data, indent=2))
+@router.delete("/backups", status_code=204)
+def delete_backups(body: DeleteBackupsBody):
+    for backup_id in body.ids:
+        try:
+            path = backup_service.get_backup_path(backup_id)
+            path.unlink()
+        except ValueError:
+            pass  # skip missing IDs silently
 
-    buf.seek(0)
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
-    filename = f"flow_backup_{timestamp}.zip"
 
-    return StreamingResponse(
-        buf,
+@router.get("/backups/{backup_id}/download")
+def download_backup(backup_id: str):
+    try:
+        path = backup_service.get_backup_path(backup_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(
+        path=str(path),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        filename=path.name,
+        headers={"Content-Disposition": f'attachment; filename="{path.name}"'},
     )
+
+
+@router.post("/backups/{backup_id}/restore")
+def restore_backup(backup_id: str, db: Session = Depends(get_db)):
+    try:
+        path = backup_service.get_backup_path(backup_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+
+    # Safety snapshot of current state before overwriting
+    backup_service.create_backup(db, trigger="pre-restore")
+
+    try:
+        backup_service.restore_from_path(path, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {"ok": True}
+
+
+@router.post("/backups/upload", status_code=201)
+async def upload_backup(file: UploadFile = File(...)):
+    content = await file.read()
+    try:
+        original_info = backup_service.validate_zip_bytes(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return backup_service.save_uploaded_backup(content, original_info)

@@ -28,6 +28,30 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _reconcile_manual_to_bank(manual_txn: Transaction, bank_txn: Transaction) -> None:
+    """
+    Update the manual transaction's date and amount to match the bank's actual
+    values (source of truth).  When there is a discrepancy, append an audit note
+    so the user can see what the original entry was.
+    """
+    adjustments: list[str] = []
+
+    if float(manual_txn.amount) != float(bank_txn.amount):
+        adjustments.append(f"${manual_txn.amount}")
+        manual_txn.amount = bank_txn.amount
+
+    if manual_txn.date != bank_txn.date:
+        adjustments.append(str(manual_txn.date))
+        manual_txn.date = bank_txn.date
+
+    if adjustments:
+        note = f"[Adjusted from {', '.join(adjustments)}]"
+        if manual_txn.notes:
+            manual_txn.notes = f"{manual_txn.notes}\n{note}"
+        else:
+            manual_txn.notes = note
+
+
 def _txn_dict(t: Transaction, balance: float | None = None) -> dict:
     d = {
         "id": t.id,
@@ -677,6 +701,7 @@ def _import_bank_rows(rows, account_id: int, db, cutoff_date=None) -> dict:
         if bank_txn and manual_txn and bank_txn.matched_to_id is None and manual_txn.matched_to_id is None:
             bank_txn.matched_to_id = manual_txn.id
             manual_txn.matched_to_id = bank_txn.id
+            _reconcile_manual_to_bank(manual_txn, bank_txn)
             used_manual_ids.add(suggestion.manual_id)
             auto_matched += 1
 
@@ -747,6 +772,8 @@ def get_reconcile_data(account_id: int, db: Session = Depends(get_db)):
             "bank": _txn_dict(bank_txn),
             "manual": _txn_dict(manual_txn),
             "score": score,
+            "amount_diff": round(float(bank_txn.amount) - float(manual_txn.amount), 2),
+            "date_diff": (bank_txn.date - manual_txn.date).days,
         })
 
     # Compute suggestions for fully unmatched bank rows
@@ -807,6 +834,7 @@ def match_transactions(body: MatchBody, db: Session = Depends(get_db)):
     bank_txn.is_reconciled = True
     manual_txn.matched_to_id = bank_txn.id
     manual_txn.is_reconciled = True
+    _reconcile_manual_to_bank(manual_txn, bank_txn)
 
     db.commit()
     return {"bank_txn_id": bank_txn.id, "manual_txn_id": manual_txn.id}

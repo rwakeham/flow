@@ -1804,7 +1804,7 @@ function renderRegister() {
       html += renderBankUnmatchedRow(g.primary, unmatchedManual);
     } else {
       html += renderManualRow(g.primary);
-      if (g.bank) html += renderBankSubRow(g.bank);
+      if (g.bank) html += renderBankSubRow(g.bank, g.primary);
     }
   }
   if (!todayInserted && todayBalance !== null) {
@@ -1850,7 +1850,7 @@ function renderManualRow(t) {
   const balStr = t.balance !== undefined ? fmtFull(t.balance) : '';
   return `<tr class="row-manual" data-id="${t.id}">
     <td>${cfFmtDate(t.date)}</td>
-    <td>${escHtml(t.description)}${t.notes ? `<br><span class="bank-desc">${escHtml(t.notes)}</span>` : ''}</td>
+    <td>${escHtml(t.description)}${t.notes && t.notes.replace(/\[Adjusted from [^\]]*\]/g, '').trim() ? `<br><span class="bank-desc">${escHtml(t.notes.replace(/\[Adjusted from [^\]]*\]/g, '').trim())}</span>` : ''}</td>
     <td class="num amount-credit">${credit}</td>
     <td class="num amount-debit">${debit}</td>
     <td class="num bal-col ${balCls}">${balStr}</td>
@@ -1859,11 +1859,13 @@ function renderManualRow(t) {
   </tr>`;
 }
 
-function renderBankSubRow(t) {
+function renderBankSubRow(t, manualTxn) {
   if (!cfShowBankSubs) return '';
+  const adjustMatch = manualTxn && manualTxn.notes ? manualTxn.notes.match(/\[Adjusted from [^\]]*\]/) : null;
+  const adjustNote = adjustMatch ? `<br><span class="bank-desc" style="margin-left:16px">${escHtml(adjustMatch[0])}</span>` : '';
   return `<tr class="row-bank-sub" data-id="${t.id}">
     <td colspan="4" style="padding-left:28px">
-      <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>
+      <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>${adjustNote}
     </td>
     <td></td>
     <td><span class="rec-check">✓</span></td>

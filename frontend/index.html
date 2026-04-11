@@ -907,7 +907,7 @@ async function _uimpDetect() {
     const sel = document.getElementById('uimp-acct-select');
     sel.innerHTML = '<option value="">— select account —</option>' +
       accts.map(a => `<option value="${a.id}"${a.id === cfCurrentId ? ' selected' : ''}>${a.name}</option>`).join('');
-    document.getElementById('uimp-acct-row').style.display = '';
+    document.getElementById('uimp-acct-row').style.display = 'block';
     if (!accts.length) {
       st.innerHTML += '<br><span style="color:var(--text-muted)">No register accounts yet — create one in Cash Flow first.</span>';
       btn.disabled = true;

@@ -357,7 +357,7 @@ def update_transaction(txn_id: int, body: TransactionUpdate, db: Session = Depen
         txn.description = body.description
     if body.amount is not None:
         txn.amount = body.amount
-    if body.notes is not None:
+    if "notes" in body.model_fields_set:
         txn.notes = body.notes
 
     db.commit()

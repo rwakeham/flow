@@ -7,7 +7,7 @@ import io
 import json
 import uuid
 import zipfile
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import text
@@ -158,9 +158,16 @@ def list_backups() -> list[dict]:
 
 
 def has_backup_today() -> bool:
-    """Return True if a backup already exists for today (UTC date)."""
+    """
+    Return True if a backup already exists for today.
+
+    "Today" is determined by the server's UTC date and compared against the
+    UTC date encoded in each backup's `created_at` (also UTC). Around UTC
+    midnight a user in a non-UTC timezone may briefly see the auto-pre-import
+    backup re-trigger; the cost is one extra ZIP, so we accept the simpler logic.
+    """
     _ensure_dir()
-    today = date.today().isoformat()  # "YYYY-MM-DD"
+    today = datetime.now(timezone.utc).date().isoformat()  # "YYYY-MM-DD" in UTC
     for path in BACKUP_DIR.glob("*.zip"):
         info = _read_zip_info(path)
         if info and info.get("created_at", "").startswith(today):

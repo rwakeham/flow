@@ -2,13 +2,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from sqlalchemy import text
 
-from auth import clear_session_cookie, create_session_cookie, require_auth, verify_password
+from auth import (
+    clear_session_cookie,
+    create_session_cookie,
+    record_login_attempt,
+    require_auth,
+    verify_password,
+)
 from database import Base, engine
 from routers import data, upload, register, backup
 
@@ -32,32 +37,34 @@ async def lifespan(app: FastAPI):
         conn.execute(text(
             "ALTER TABLE register_accounts ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE"
         ))
-        # Backfill bank_description on manual transactions created via Add-to-Ledger.
-        # These have source='manual' but bank_description was not copied at creation time,
-        # causing them to appear in the description autocomplete alongside user-typed entries.
-        conn.execute(text("""
-            UPDATE transactions AS m
-               SET bank_description = b.bank_description
-              FROM transactions AS b
-             WHERE m.source          = 'manual'
-               AND m.matched_to_id   = b.id
-               AND b.source          = 'bank'
-               AND b.bank_description IS NOT NULL
-               AND m.bank_description IS NULL
-        """))
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "  name TEXT PRIMARY KEY,"
+            "  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+            ")"
+        ))
+        already_applied = conn.execute(text(
+            "SELECT 1 FROM schema_migrations WHERE name = :name"
+        ), {"name": "backfill_bank_description_on_manual"}).first()
+        if not already_applied:
+            conn.execute(text("""
+                UPDATE transactions AS m
+                   SET bank_description = b.bank_description
+                  FROM transactions AS b
+                 WHERE m.source          = 'manual'
+                   AND m.matched_to_id   = b.id
+                   AND b.source          = 'bank'
+                   AND b.bank_description IS NOT NULL
+                   AND m.bank_description IS NULL
+            """))
+            conn.execute(text(
+                "INSERT INTO schema_migrations (name) VALUES (:name)"
+            ), {"name": "backfill_bank_description_on_manual"})
         conn.commit()
     yield
 
 
 app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 app.include_router(upload.router)
 app.include_router(data.router)
@@ -73,8 +80,17 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-def login(body: LoginRequest, response: Response):
-    if not verify_password(body.password):
+def login(body: LoginRequest, request: Request, response: Response):
+    client_ip = request.client.host if request.client else "unknown"
+    ok = verify_password(body.password)
+    locked, retry_after = record_login_attempt(client_ip, success=ok)
+    if locked:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    if not ok:
         raise HTTPException(status_code=401, detail="Invalid password")
     create_session_cookie(response)
     return {"ok": True}

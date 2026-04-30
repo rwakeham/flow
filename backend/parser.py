@@ -62,7 +62,7 @@ def parse_upload(content: bytes, filename: str) -> ParseResult:
 
     date_col = _find_date_column(df)
     try:
-        df[date_col] = pd.to_datetime(df[date_col], infer_datetime_format=True)
+        df[date_col] = pd.to_datetime(df[date_col])
     except Exception:
         raise ValueError(
             f"Could not parse dates in column '{date_col}'. "

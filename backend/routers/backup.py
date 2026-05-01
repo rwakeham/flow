@@ -9,6 +9,8 @@ import backup_service
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
 
 @router.get("/backups")
 def list_backups():
@@ -68,7 +70,9 @@ def restore_backup(backup_id: str, db: Session = Depends(get_db)):
 
 @router.post("/backups/upload", status_code=201)
 async def upload_backup(file: UploadFile = File(...)):
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
     try:
         original_info = backup_service.validate_zip_bytes(content)
     except ValueError as exc:

@@ -82,7 +82,7 @@ def _compute_running_balance(opening: float, txns: list[Transaction]) -> dict:
       forecast_balance — opening + all manual transactions
       verified_balance — opening + reconciled manual transactions only
     """
-    sorted_txns = sorted(txns, key=lambda t: (t.date, t.created_at or t.id))
+    sorted_txns = sorted(txns, key=lambda t: (t.date, t.id))
 
     running_bal = opening
     forecast_bal = opening
@@ -218,17 +218,28 @@ def register_accounts_timeseries(db: Session = Depends(get_db)):
 @router.get("/accounts")
 def list_register_accounts(db: Session = Depends(get_db)):
     accounts = db.query(RegisterAccount).order_by(RegisterAccount.id).all()
+    if not accounts:
+        return []
+
+    # One query: sum each account's manual transactions, honoring per-account cutoff.
+    sum_rows = db.execute(text("""
+        SELECT t.register_account_id, COALESCE(SUM(t.amount), 0)
+          FROM transactions t
+          JOIN register_accounts a ON a.id = t.register_account_id
+         WHERE t.source = 'manual'
+           AND (
+                a.cutoff_date IS NULL
+             OR a.cutoff_balance IS NULL
+             OR t.date >= a.cutoff_date
+           )
+         GROUP BY t.register_account_id
+    """)).fetchall()
+    sums: dict[int, float] = {row[0]: float(row[1]) for row in sum_rows}
+
     result = []
     for acct in accounts:
-        opening, cutoff_date = _effective_opening(acct)
-        query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE register_account_id = :aid AND source = 'manual'"
-        params: dict = {"aid": acct.id}
-        if cutoff_date:
-            query += " AND date >= :cutoff"
-            params["cutoff"] = cutoff_date
-        row = db.execute(text(query), params).scalar()
-        current_balance = opening + float(row)
-        result.append(_acct_dict(acct, current_balance))
+        opening, _ = _effective_opening(acct)
+        result.append(_acct_dict(acct, opening + sums.get(acct.id, 0.0)))
     return result
 
 

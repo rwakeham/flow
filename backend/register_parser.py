@@ -150,17 +150,13 @@ def _detect_format(rows: list[list[str]]) -> FileFormat:
 
         checked += 1
         col1 = fields[1].replace(",", "").replace("$", "").strip()
-        if not col1:
-            # Empty description — can't determine from this row alone
-            if checked >= 20:
-                break
-            continue
-        try:
-            float(col1)
-            return FileFormat.BANK
-        except ValueError:
-            return FileFormat.LEDGER
-
+        if col1:
+            try:
+                float(col1)
+                return FileFormat.BANK
+            except ValueError:
+                return FileFormat.LEDGER
+        # Empty col1 — can't classify from this row alone; keep scanning.
         if checked >= 20:
             break
 
@@ -283,17 +279,22 @@ def _parse_accounting_amount(s: str) -> float | None:
 
 
 def _parse_date(s: str) -> date:
-    """Parse date strings in common CSV export formats."""
+    """
+    Parse date strings in common US-export CSV formats.
+
+    Slash/dash formats are interpreted as month-first (MM/DD/YYYY). Files using
+    DD/MM ordering are not supported — the ambiguity would silently misread
+    dates like 03/04/2026.
+    """
     s = s.strip()
-    # Try ISO format first (YYYY-MM-DD) since it's unambiguous
+    # ISO formats first since they are unambiguous.
     for fmt in (
         "%Y-%m-%d",      # 2026-01-15
+        "%Y/%m/%d",      # 2026/01/15
         "%m/%d/%y",      # 1/15/26 or 01/15/26
         "%m/%d/%Y",      # 1/15/2026 or 01/15/2026
-        "%m-%d-%Y",      # 01-15-2026
         "%m-%d-%y",      # 01-15-26
-        "%d/%m/%Y",      # 15/01/2026 (some international exports)
-        "%Y/%m/%d",      # 2026/01/15
+        "%m-%d-%Y",      # 01-15-2026
     ):
         try:
             return datetime.strptime(s, fmt).date()

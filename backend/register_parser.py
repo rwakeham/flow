@@ -1,20 +1,23 @@
 """
 Parser for two supported import formats:
 
-1. Bank export (Wells Fargo tab-separated):
-       Date\tAmount\t*\tCheckNum\tDescription
-   Column 1 is a numeric amount → detected as bank format.
-   Returns BankRow objects (source='bank').
+1. Bank export — two known column layouts:
+   a. Amount-first (legacy Wells Fargo TSV, no header):
+          Date \t Amount \t * \t CheckNum \t Description
+   b. Description-first (current Wells Fargo TSV/CSV, with header):
+          Date \t Description \t Amount \t Check# \t Status
+   Both produce BankRow objects (source='bank').
 
 2. Ledger/spreadsheet export (user's manual tracking sheet):
-       Date\tDescription\tCredit\tDebit\tReconciled\tBalance\t...
-   Column 1 is a text description → detected as ledger format.
+       Date \t Description \t Credit \t Debit \t Reconciled \t Balance \t ...
    Credit column: '$2,478.30' or empty.
    Debit column:  '$(3,099.54)' or '($3,099.54)' (accounting negative) or empty.
    Reconciled column: 'X' or empty.
    Returns LedgerRow objects (source='manual').
 
-Auto-detects delimiter (tab or comma/CSV), strips BOM, handles quoted fields.
+Detection priority: header row keywords (most reliable when present), then
+positional heuristics on the first 20 data rows. Auto-detects delimiter
+(tab or comma/CSV), strips BOM, handles quoted fields.
 """
 
 from __future__ import annotations
@@ -31,6 +34,11 @@ class FileFormat(Enum):
     BANK = "bank"
     LEDGER = "ledger"
     UNKNOWN = "unknown"
+
+
+class _BankLayout(Enum):
+    AMOUNT_FIRST = "amount_first"   # Date | Amount | * | Check# | Description
+    DESC_FIRST = "desc_first"       # Date | Description | Amount | Check# | Status
 
 
 @dataclass
@@ -75,10 +83,32 @@ def parse_register_import(content: bytes) -> ParseResult:
     if not rows:
         return ParseResult(format=FileFormat.UNKNOWN, bank_rows=[], ledger_rows=[])
 
+    # Try header-based detection first; fall back to positional heuristics.
+    header_match = _detect_from_header(rows[0])
+    if header_match is not None:
+        kind, layout = header_match
+        data_rows = rows[1:]
+        if kind == FileFormat.BANK:
+            return ParseResult(
+                format=FileFormat.BANK,
+                bank_rows=_build_bank_rows(data_rows, layout),
+                ledger_rows=[],
+            )
+        if kind == FileFormat.LEDGER:
+            return ParseResult(
+                format=FileFormat.LEDGER,
+                bank_rows=[],
+                ledger_rows=_build_ledger_rows(data_rows),
+            )
+
     fmt = _detect_format(rows)
 
     if fmt == FileFormat.BANK:
-        return ParseResult(format=FileFormat.BANK, bank_rows=_build_bank_rows(rows), ledger_rows=[])
+        return ParseResult(
+            format=FileFormat.BANK,
+            bank_rows=_build_bank_rows(rows, _BankLayout.AMOUNT_FIRST),
+            ledger_rows=[],
+        )
     elif fmt == FileFormat.LEDGER:
         return ParseResult(format=FileFormat.LEDGER, bank_rows=[], ledger_rows=_build_ledger_rows(rows))
     else:
@@ -133,9 +163,41 @@ def _parse_to_rows(text: str) -> list[list[str]]:
 
 # ── Format detection ──────────────────────────────────────────────────────────
 
+def _detect_from_header(row: list[str]) -> "tuple[FileFormat, _BankLayout | None] | None":
+    """
+    Recognize a header row and map it to a known format/layout. Returns None if
+    the row isn't a header or doesn't match a known schema.
+    """
+    if not row or len(row) < 2:
+        return None
+    # If col 0 already parses as a date, this is a data row, not a header.
+    try:
+        _parse_date(row[0])
+        return None
+    except ValueError:
+        pass
+
+    cols = [re.sub(r"[#\s]+", " ", c).strip().lower() for c in row]
+    if cols[0] not in ("date", "post date", "transaction date", "posted date"):
+        return None
+
+    # Description-first bank: Date | Description | Amount | Check | Status
+    if len(cols) >= 3 and cols[1] == "description" and cols[2] == "amount":
+        return (FileFormat.BANK, _BankLayout.DESC_FIRST)
+    # Amount-first bank: Date | Amount | ... | Description
+    if cols[1] == "amount":
+        return (FileFormat.BANK, _BankLayout.AMOUNT_FIRST)
+    # Ledger spreadsheet: Date | Description | Credit | Debit | ...
+    if (len(cols) >= 4 and cols[1] == "description"
+            and "credit" in cols[2] and "debit" in cols[3]):
+        return (FileFormat.LEDGER, None)
+    return None
+
+
 def _detect_format(rows: list[list[str]]) -> FileFormat:
     """
-    Scan up to the first 20 rows with a parseable date to determine format:
+    Positional fallback when no recognizable header is present. Scans up to the
+    first 20 rows with a parseable date:
     - Bank:   col 0 = date, col 1 = numeric amount
     - Ledger: col 0 = date, col 1 = text description
     """
@@ -165,7 +227,14 @@ def _detect_format(rows: list[list[str]]) -> FileFormat:
 
 # ── Bank format ───────────────────────────────────────────────────────────────
 
-def _build_bank_rows(rows: list[list[str]]) -> list[BankRow]:
+def _build_bank_rows(rows: list[list[str]], layout: _BankLayout) -> list[BankRow]:
+    if layout == _BankLayout.DESC_FIRST:
+        return _build_bank_rows_desc_first(rows)
+    return _build_bank_rows_amount_first(rows)
+
+
+def _build_bank_rows_amount_first(rows: list[list[str]]) -> list[BankRow]:
+    """Layout: Date | Amount | * | Check# | Description (legacy WF TSV)."""
     result: list[BankRow] = []
     for fields in rows:
         if len(fields) < 2:
@@ -200,6 +269,40 @@ def _build_bank_rows(rows: list[list[str]]) -> list[BankRow]:
             check_number=check_number,
         ))
     return result
+
+
+def _build_bank_rows_desc_first(rows: list[list[str]]) -> list[BankRow]:
+    """Layout: Date | Description | Amount | Check# | Status (current WF export)."""
+    result: list[BankRow] = []
+    for fields in rows:
+        if len(fields) < 3:
+            continue
+        try:
+            txn_date = _parse_date(fields[0])
+        except ValueError:
+            continue
+        description = fields[1].strip()
+        amount_str = fields[2].replace(",", "").replace("$", "").strip()
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            continue
+
+        check_number: str | None = None
+        if len(fields) >= 4 and fields[3].strip():
+            check_number = fields[3].strip()
+
+        result.append(BankRow(
+            date=txn_date,
+            amount=amount,
+            bank_description=_normalize_whitespace(description),
+            check_number=check_number,
+        ))
+    return result
+
+
+def _normalize_whitespace(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
 
 
 # ── Ledger format ─────────────────────────────────────────────────────────────

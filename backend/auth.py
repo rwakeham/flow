@@ -30,8 +30,9 @@ except KeyError as exc:
 COOKIE_NAME = "flow_session"
 COOKIE_MAX_AGE = 86400 * 30  # 30 days
 
-# Cookies are marked Secure unless explicitly disabled (e.g. local dev over HTTP).
-COOKIE_SECURE = os.environ.get("COOKIE_INSECURE", "").lower() not in ("1", "true", "yes")
+# Cookies are marked Secure only when explicitly enabled (e.g. behind HTTPS).
+# Default off so the app works out of the box over plain HTTP.
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").lower() in ("1", "true", "yes")
 
 # Login throttle: max N failed attempts per IP within WINDOW seconds.
 _LOGIN_MAX_FAILURES = 5

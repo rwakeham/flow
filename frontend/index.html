@@ -1451,16 +1451,19 @@ function cfToggleBankSubs() {
 
 // ── Description autocomplete helpers ─────────────────────────────────────────
 function _manualDescriptions() {
-  // Unique descriptions from manual transactions only (never bank-imported rows).
-  // Guard on both source and bank_description to catch rows where source may have
-  // defaulted to 'manual' before the column existed.
+  // Unique descriptions from manual transactions, newest first.
+  // Skip rows whose description was taken verbatim from a bank import
+  // (description === bank_description) so raw bank strings don't pollute
+  // the suggestions; user-customized descriptions are kept even if the row
+  // also has a bank_description (e.g. created via Add-to-Ledger and renamed).
   const seen = new Set();
   const result = [];
   for (const t of [...cfAllTxns].reverse()) {  // cfAllTxns is asc, reverse = newest first
-    if (t.source === 'manual' && !t.bank_description && t.description && !seen.has(t.description)) {
-      seen.add(t.description);
-      result.push({ description: t.description, amount: t.amount });
-    }
+    if (t.source !== 'manual' || !t.description) continue;
+    if (t.bank_description && t.description === t.bank_description) continue;
+    if (seen.has(t.description)) continue;
+    seen.add(t.description);
+    result.push({ description: t.description, amount: t.amount });
   }
   return result;
 }

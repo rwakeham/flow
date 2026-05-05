@@ -384,7 +384,8 @@ button:hover { background: var(--surface2); }
     <p style="font-size:12px;color:var(--text-muted)" id="atl-bank-desc"></p>
     <input type="hidden" id="atl-bank-txn-id">
     <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Description for ledger</label>
-    <input type="text" id="atl-desc" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <input type="text" id="atl-desc" list="atl-desc-list" autocomplete="off" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <datalist id="atl-desc-list"></datalist>
     <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Notes (optional)</label>
     <input type="text" id="atl-notes" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
     <div class="modal-footer" style="margin-top:12px">
@@ -1464,10 +1465,10 @@ function _manualDescriptions() {
   return result;
 }
 
-function _setupDescAutocomplete() {
-  const input = document.getElementById('txn-desc');
-  const list  = document.getElementById('txn-desc-list');
-  const amtEl = document.getElementById('txn-amount');
+function _setupDescAutocomplete(inputId, listId, amountId = null) {
+  const input = document.getElementById(inputId);
+  const list  = document.getElementById(listId);
+  const amtEl = amountId ? document.getElementById(amountId) : null;
 
   input.addEventListener('input', () => {
     const q = input.value.trim().toLowerCase();
@@ -1481,13 +1482,15 @@ function _setupDescAutocomplete() {
     });
   });
 
-  input.addEventListener('change', () => {
-    const val = input.value.trim();
-    const match = _manualDescriptions().find(d => d.description === val);
-    if (match && !amtEl.value.trim()) {
-      amtEl.value = match.amount.toFixed(2);
-    }
-  });
+  if (amtEl) {
+    input.addEventListener('change', () => {
+      const val = input.value.trim();
+      const match = _manualDescriptions().find(d => d.description === val);
+      if (match && !amtEl.value.trim()) {
+        amtEl.value = match.amount.toFixed(2);
+      }
+    });
+  }
 }
 
 function cfUpdateToolbar() {
@@ -1952,7 +1955,7 @@ function openAddTxn() {
   document.getElementById('txn-notes').value = '';
   document.getElementById('add-txn-error').style.display = 'none';
   document.getElementById('add-txn-modal').classList.remove('hidden');
-  if (!_descAutocompleteSetup) { _setupDescAutocomplete(); _descAutocompleteSetup = true; }
+  if (!_descAutocompleteSetup) { _setupDescAutocomplete('txn-desc', 'txn-desc-list', 'txn-amount'); _descAutocompleteSetup = true; }
   setTimeout(() => document.getElementById('txn-desc').focus(), 50);
 }
 function openEditTxn(id) {
@@ -1979,7 +1982,7 @@ function openDupeTxn(id) {
   document.getElementById('txn-notes').value = '';
   document.getElementById('add-txn-error').style.display = 'none';
   document.getElementById('add-txn-modal').classList.remove('hidden');
-  if (!_descAutocompleteSetup) { _setupDescAutocomplete(); _descAutocompleteSetup = true; }
+  if (!_descAutocompleteSetup) { _setupDescAutocomplete('txn-desc', 'txn-desc-list', 'txn-amount'); _descAutocompleteSetup = true; }
   setTimeout(() => document.getElementById('txn-date').focus(), 50);
 }
 function closeAddTxn() { document.getElementById('add-txn-modal').classList.add('hidden'); }
@@ -2061,12 +2064,14 @@ async function doManualMatch(bankId) {
 }
 
 // ── Add to Ledger ─────────────────────────────────────────────────────────────
+let _atlDescAutocompleteSetup = false;
 function openAtl(bankId, bankDesc) {
   document.getElementById('atl-bank-txn-id').value = bankId;
   document.getElementById('atl-bank-desc').textContent = 'Bank: ' + bankDesc;
   document.getElementById('atl-desc').value = bankDesc;
   document.getElementById('atl-notes').value = '';
   document.getElementById('add-to-ledger-modal').classList.remove('hidden');
+  if (!_atlDescAutocompleteSetup) { _setupDescAutocomplete('atl-desc', 'atl-desc-list'); _atlDescAutocompleteSetup = true; }
   setTimeout(() => document.getElementById('atl-desc').focus(), 50);
 }
 function closeAtl() { document.getElementById('add-to-ledger-modal').classList.add('hidden'); }

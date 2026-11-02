@@ -40,7 +40,8 @@ backend/                — FastAPI application
   testdata/               Synthetic sample files and their formats (sample_files.py), named by layout shape,
                           with the rows each reads to (expected_rows/)
   recurring.py            Recurring-transaction projection
-  backup_service.py       Backup file generation (all register and card tables); backup ids and zip size limits
+  backup_service.py       Backup file generation (all register and card tables); backup ids and zip size limits;
+                          the daily backup loop, retention (due / prune) and the encrypted copy (encrypt_backup)
   security_headers.py     ASGI middleware: CSP, nosniff, Referrer-Policy, X-Frame-Options on every response;
                           SameOrigin refuses state-changing requests from another origin (403)
   body_limit.py           ASGI middleware: request body size cap (413), per-path limits
@@ -207,6 +208,24 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   `INSERT`s by column name, so `_check_card_columns` allows only the table's own columns (from the
   ORM metadata) before anything is deleted, and the statement quotes them. The card CSV export
   passes text cells through `routers/cards.spreadsheet_safe` (a leading `'` before = + - @).
+  **The daily backup** (`backup_service.loop`, started by the lifespan beside the update check; a few
+  minutes after startup, then every 15 minutes): `run_scheduled` takes one `scheduled` backup a day once
+  it is `due` (at or after `settings_store.backup_hour()` UTC, judged by the newest scheduled backup's
+  `created_at`, never the file's mtime; a restart after the hour catches up) while
+  `backup_daily_flag()` is on, then `prune_backups(backup_keep())` removes the automatic backups
+  (`PRUNABLE`: scheduled, auto-pre-import) beyond the newest N (0 keeps all); manual, uploaded and
+  pre-restore backups are never removed. `due` / `prune` / `last_scheduled` are pure. One `_lock` serializes
+  every write and prune. The settings (`backup_daily`, `backup_keep`, `backup_hour`: `SETTING_ENV` →
+  `FLOW_BACKUP_*`) are `GET`/`PUT /api/backups/settings` (409 while `.env` sets one) and shown under
+  Settings → Backups; a restore keeps them, with the session keys and `update_check`
+  (`KEEP_ON_RESTORE`). **Encrypted copies** are download/upload only, the files on the server stay plain:
+  `POST /api/backups/{id}/download` with `{passphrase}` (8..200 chars, a POST so it is never in a URL)
+  returns `encrypt_backup`'s container as `<id>.flowbackup` (`MAGIC` FLOWBK1, 16-byte salt, scrypt
+  n_log2/r/p, 12-byte nonce, AES-GCM over the zip with the header as AAD; key = `hashlib.scrypt`, N=2^17,
+  r=8, p=1, `maxmem` 2×128·r·N since OpenSSL refuses exactly 128·r·N); the upload route takes an optional
+  `passphrase` form field and `decrypt_backup`s a file that starts with the magic (422 on
+  `WrongPassphrase`; header parameters outside n_log2 10..18, r 1..16, p 1..4 are refused before scrypt
+  runs, since an uploaded header is someone else's data). The passphrase is never stored.
 - **Balance sheet** (`accounts`, `balances`, `balance_sheet.py`, `routers/balances.py`): values are typed,
   pasted, or read from a balance file (Update balances → File: `POST /api/balances/import/read` reads a holdings or
   accounts export with any saved `balance` import format, `resolve.choose` across all of them since one file lists
@@ -554,6 +573,9 @@ the proxy settings). For host state:
 | `FLOW_AI_ENABLED` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn AI calls off even with a key set (the AI dialog's switch, `ai_enabled`) |
 | `FLOW_AI_REDACT` | *(empty)* | Comma-separated extra words stripped from merchant names before any AI call (the AI dialog's field, `ai_redact`) |
 | `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Settings → Updates has the same switch, `update_check`) |
+| `FLOW_BACKUP_DAILY` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily backup off (Settings → Backups, `backup_daily`) |
+| `FLOW_BACKUP_KEEP` | `30` | Automatic backups kept, newest first; `0` keeps all (`backup_keep`, clamped 0..3650) |
+| `FLOW_BACKUP_HOUR` | `3` | UTC hour the daily backup is taken at or after (`backup_hour`, 0..23) |
 
 `.env.example` lists the four user-facing variables (`POSTGRES_PASSWORD`, `FLOW_PASSWORD`,
 `SECRET_KEY` blank, so a copied file can't deploy as is; `APP_PORT`), plus the optional ones commented out.
@@ -563,7 +585,7 @@ Anthropic API key (read hidden; `off` removes the line). The models, switch and 
 dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
 `${VAR:-}` with a blank default: a non-blank default would reach the app as a set variable and lock the
 setting in the dialog (409). On a re-run with a database volume, `setup.sh` offers to
-remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*` and `FLOW_UPDATE_CHECK` still in `.env` that this run didn't
+remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*`, `FLOW_UPDATE_CHECK` and `FLOW_BACKUP_*` still in `.env` that this run didn't
 just set (`_env_unset`), since Flow has copied them in. `deploy.sh` requires `POSTGRES_PASSWORD` and
 `SECRET_KEY`, requires `FLOW_PASSWORD` only before the first start (no `pgdata` volume by Compose's
 labels), and notes the values Flow keeps that are still set. `DATABASE_URL`, `COOKIE_SECURE`,

@@ -1,11 +1,24 @@
 """
 Backup service – creates, lists, restores, and manages ZIP backups stored on disk.
+
+The daily backup (``loop``, started by main.py's lifespan) takes one ``scheduled`` backup a day at or
+after ``settings_store.backup_hour()`` UTC and then keeps only the newest ``settings_store.backup_keep()``
+automatic backups (``PRUNABLE``: scheduled and auto-pre-import); backups taken by hand, uploaded or
+taken before a restore are never removed by Flow. ``encrypt_backup`` / ``decrypt_backup`` wrap a zip for
+a copy kept off the server: a small container (``MAGIC``, scrypt salt and parameters, nonce, AES-GCM
+ciphertext with the header as associated data) under a passphrase Flow never stores. The backups in
+``BACKUP_DIR`` stay plain zips.
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import io
 import json
+import logging
 import re
+import secrets
+import threading
 from datetime import date
 from decimal import Decimal
 import uuid
@@ -16,12 +29,23 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import settings_store
 from models import REVOKED_SESSIONS_KEY, SESSION_EPOCH_KEY, Account, Balance, Base, RegisterAccount, Transaction
+
+log = logging.getLogger("flow.backup")
 
 # flow_settings rows that belong to the running install's sessions, never to a backup.
 SESSION_KEYS = (SESSION_EPOCH_KEY, REVOKED_SESSIONS_KEY)
+# flow_settings rows a restore keeps from the running install: the sessions above, and the install's
+# own schedule (the daily backup and update check), which an older backup must not reset.
+KEEP_ON_RESTORE = SESSION_KEYS + (settings_store.BACKUP_DAILY, settings_store.BACKUP_KEEP,
+                                  settings_store.BACKUP_HOUR, settings_store.UPDATE_CHECK)
 
 BACKUP_DIR = Path("/backups")
+
+# One backup is written or removed at a time (the daily loop, an import's pre-import backup and
+# the user's "+ New Backup" can coincide).
+_lock = threading.Lock()
 
 # A backup's id is its file name without .zip, always in the form create_backup and
 # save_uploaded_backup write. Anything else (a path, "..") is refused before the disk is touched.
@@ -168,6 +192,11 @@ def _build_zip_bytes(data: dict, backup_info: dict) -> bytes:
 
 def create_backup(db: Session, trigger: str = "manual") -> dict:
     """Serialise current DB state into a ZIP and save to BACKUP_DIR."""
+    with _lock:
+        return _create_backup(db, trigger)
+
+
+def _create_backup(db: Session, trigger: str) -> dict:
     _ensure_dir()
     data = _serialize(db)
     now = datetime.now(timezone.utc)
@@ -195,7 +224,8 @@ def create_backup(db: Session, trigger: str = "manual") -> dict:
     }
 
 
-TRIGGERS = ("manual", "auto-pre-import", "pre-restore", "uploaded")
+TRIGGERS = ("manual", "auto-pre-import", "pre-restore", "uploaded", "scheduled")
+PRUNABLE = ("scheduled", "auto-pre-import")       # the automatic ones: retention applies to these only
 TABLE_COUNTS = ("accounts", "balances", "register_accounts", "transactions", *CARD_TABLES)
 
 
@@ -269,6 +299,137 @@ def ensure_daily_backup(db: Session) -> None:
     """Create an auto-pre-import backup if none has been taken today."""
     if not has_backup_today():
         create_backup(db, trigger="auto-pre-import")
+
+
+# ── The daily backup and retention ───────────────────────────────────────────
+
+FIRST_DELAY = 180          # seconds after startup: the deploy's health check comes first
+INTERVAL = 15 * 60         # between checks: a restart still gets its backup the same day
+BACKUP_OLD_DAYS = 7        # the Dashboard says so when the newest backup is older than this
+
+
+def last_scheduled(entries: list[dict]) -> str | None:
+    """When the newest scheduled backup was taken (its backup_info created_at, never the file's
+    mtime: an uploaded backup keeps its original date). Pure."""
+    times = [e.get("created_at") or "" for e in entries if e.get("trigger") == "scheduled"]
+    return max(times) if times else None
+
+
+def due(now_utc: datetime, last_scheduled_at: str | None, hour: int) -> bool:
+    """Whether today's scheduled backup is still owed: it is ``hour`` o'clock UTC or later and no
+    scheduled backup was taken today (UTC). A restart after the hour catches up at its first tick. Pure."""
+    if now_utc.hour < hour:
+        return False
+    if not last_scheduled_at:
+        return True
+    try:
+        last = datetime.fromisoformat(last_scheduled_at)
+    except ValueError:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return last.astimezone(timezone.utc).date() < now_utc.date()
+
+
+def prune(entries: list[dict], keep: int) -> list[str]:
+    """The ids of automatic backups (PRUNABLE triggers) beyond the newest ``keep`` by created_at;
+    ``keep`` 0 keeps every one. Backups taken by hand, uploaded or taken before a restore are never
+    listed. Pure."""
+    if keep <= 0:
+        return []
+    automatic = sorted((e for e in entries if e.get("trigger") in PRUNABLE),
+                       key=lambda e: e.get("created_at") or "", reverse=True)
+    return [e["id"] for e in automatic[keep:]]
+
+
+def prune_backups(keep: int) -> int:
+    """Remove the automatic backups retention no longer keeps; returns how many."""
+    with _lock:
+        ids = prune(list_backups(), keep)
+        for backup_id in ids:
+            (BACKUP_DIR / f"{backup_id}.zip").unlink(missing_ok=True)
+    return len(ids)
+
+
+def run_scheduled(session_factory) -> dict:
+    """One tick of the daily task: the day's backup if it is due and the switch is on, then retention."""
+    out = {"created": None, "pruned": 0}
+    if settings_store.backup_daily_flag() and due(datetime.now(timezone.utc), last_scheduled(list_backups()),
+                                                  settings_store.backup_hour()):
+        with session_factory() as db:
+            out["created"] = create_backup(db, trigger="scheduled")
+        log.info("daily backup taken: %s", out["created"]["id"])
+    out["pruned"] = prune_backups(settings_store.backup_keep())
+    if out["pruned"]:
+        log.info("retention removed %d automatic backup(s)", out["pruned"])
+    return out
+
+
+async def loop(session_factory, first_delay: float = FIRST_DELAY, interval: float = INTERVAL) -> None:
+    """Background task started by main.py's lifespan: run_scheduled a few minutes after startup, then
+    every ``interval`` seconds. It never raises, so it outlives any failure."""
+    await asyncio.sleep(first_delay)
+    while True:
+        try:
+            await asyncio.to_thread(run_scheduled, session_factory)
+        except Exception:    # noqa: BLE001 - the task must keep going
+            log.exception("daily backup")
+        await asyncio.sleep(interval)
+
+
+# ── Encrypted copies (download / upload only; the server's files stay plain) ─
+
+MAGIC = b"FLOWBK1"
+ENCRYPTED_SUFFIX = ".flowbackup"
+SCRYPT_N_LOG2, SCRYPT_R, SCRYPT_P = 17, 8, 1      # ~128 MB and well under a second per file key
+_SALT_LEN, _NONCE_LEN, _TAG_LEN = 16, 12, 16
+HEADER_LEN = len(MAGIC) + _SALT_LEN + 3 + _NONCE_LEN
+PASSPHRASE_MIN, PASSPHRASE_MAX = 8, 200
+
+
+class WrongPassphrase(ValueError):
+    """The passphrase doesn't open the file (or the file is damaged): AES-GCM's tag didn't verify."""
+
+
+def is_encrypted(blob: bytes) -> bool:
+    return blob[:len(MAGIC)] == MAGIC
+
+
+def _file_key(passphrase: str, salt: bytes, n_log2: int, r: int, p: int) -> bytes:
+    n = 2 ** n_log2
+    return hashlib.scrypt(passphrase.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=32,
+                          maxmem=2 * 128 * r * n)
+
+
+def encrypt_backup(zip_bytes: bytes, passphrase: str) -> bytes:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    salt, nonce = secrets.token_bytes(_SALT_LEN), secrets.token_bytes(_NONCE_LEN)
+    header = MAGIC + salt + bytes([SCRYPT_N_LOG2, SCRYPT_R, SCRYPT_P]) + nonce
+    key = _file_key(passphrase, salt, SCRYPT_N_LOG2, SCRYPT_R, SCRYPT_P)
+    return header + AESGCM(key).encrypt(nonce, zip_bytes, header)
+
+
+def decrypt_backup(blob: bytes, passphrase: str) -> bytes:
+    """The zip inside an encrypted copy. ValueError when it isn't one (or asks for scrypt parameters
+    Flow won't run: the header of an uploaded file is someone else's data); WrongPassphrase when the
+    passphrase is wrong or the file was changed."""
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    if not is_encrypted(blob) or len(blob) < HEADER_LEN + _TAG_LEN:
+        raise ValueError("Not an encrypted Flow backup")
+    header = blob[:HEADER_LEN]
+    pos = len(MAGIC)
+    salt = header[pos:pos + _SALT_LEN]
+    pos += _SALT_LEN
+    n_log2, r, p = header[pos], header[pos + 1], header[pos + 2]
+    nonce = header[pos + 3:pos + 3 + _NONCE_LEN]
+    if not (10 <= n_log2 <= 18 and 1 <= r <= 16 and 1 <= p <= 4):
+        raise ValueError("Not an encrypted Flow backup (unsupported parameters)")
+    key = _file_key(passphrase, salt, n_log2, r, p)
+    try:
+        return AESGCM(key).decrypt(nonce, blob[HEADER_LEN:], header)
+    except InvalidTag:
+        raise WrongPassphrase("Wrong passphrase, or the file is damaged") from None
 
 
 def get_backup_path(backup_id: str) -> Path:
@@ -399,8 +560,9 @@ def restore_from_path(path: Path, db: Session) -> None:
     sessions: dict[str, str] = {}
     if restore_cards:
         # The session generation and the revoked session ids are the running install's, not the
-        # backup's: restoring an old backup must not bring back cookies a sign-out ended.
-        for key in SESSION_KEYS:
+        # backup's: restoring an old backup must not bring back cookies a sign-out ended. The same
+        # goes for the install's own schedule (daily backup, update check).
+        for key in KEEP_ON_RESTORE:
             value = db.execute(text("SELECT value FROM flow_settings WHERE key = :k"), {"k": key}).scalar()
             if value is not None:
                 sessions[key] = value
@@ -468,7 +630,7 @@ def restore_from_path(path: Path, db: Session) -> None:
                 params = ", ".join(f":p{i}" for i in range(len(cols)))
                 db.execute(text(f'INSERT INTO "{table}" ({names}) VALUES ({params})'),
                            {f"p{i}": row[c] for i, c in enumerate(cols)})
-        for key in SESSION_KEYS:
+        for key in KEEP_ON_RESTORE:
             db.execute(text("DELETE FROM flow_settings WHERE key = :k"), {"k": key})
             if key in sessions:
                 db.execute(text("INSERT INTO flow_settings (key, value) VALUES (:k, :v)"),

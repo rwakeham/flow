@@ -109,7 +109,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 - **One shared password, one user.** There are no accounts, roles or audit trail; anyone with the password sees and can change everything.
 - **Plain HTTP by default.** Traffic, including the password and session cookie, is encrypted only if you put Flow behind HTTPS.
 - **Defense in depth over completeness.** The app runs as an unprivileged user with request, file and backup size limits, security headers and a login throttle, but some container hardening and base-image findings are accepted as low risk on a private network.
-- **Your data in plain form on your server.** The database and backup files aren't encrypted by Flow; protect the host and wherever you keep downloaded backups.
+- **Your data in plain form on your server.** The database and the backup files on the server aren't encrypted by Flow; protect the host. A copy you download can be encrypted under a passphrase (**↓ encrypted** in **Settings → Backups**) for keeping somewhere else.
 
 [SECURITY.md](SECURITY.md) summarizes the security model and its accepted risks, and explains how to report a vulnerability.
 
@@ -120,7 +120,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 - **One password.** Anyone with it sees everything. Choose a long one; `setup.sh` can change it later, and changing it signs every browser out. **Sign out** ends that browser's session (a copy of its cookie stops working too); **Sign out ▾ → Sign out everywhere** ends every session without a password change, for a lost device or a browser you forgot to sign out of.
 - **If the login lock trips on its own.** Failed logins are counted per client address. On Docker Desktop (Mac and Windows), and for connections that reach the container through Docker's userland proxy (IPv6, `localhost`), every device on your network can arrive from the same internal address, so five wrong passwords from any one of them lock everyone out for five minutes. Set `FLOW_TRUSTED_PROXIES` to that address range (for example `172.16.0.0/12`) only if a reverse proxy in front of Flow sends `X-Forwarded-For`; otherwise the lock simply clears itself after five minutes, and keeping Flow on a network you trust is the fix.
 - **Other web apps on the same host name.** Flow refuses a change request that the browser says came from another origin, including another port on the same host, so a page from another app on the machine can't act with your cookie. Reads need the password either way.
-- **Backups hold everything.** A backup zip (**Settings → Backups**) contains all your data in plain JSON. Store downloads somewhere you'd keep bank statements.
+- **Backups hold everything.** A backup zip (**Settings → Backups**) contains all your data in plain JSON. Flow takes one every day (03:00 UTC by default) and before the first import of a day, keeping the newest 30 automatic ones; backups you take or upload stay until you delete them. Store downloads somewhere you'd keep bank statements, or download the encrypted copy: it is AES-GCM under a key derived from your passphrase, which Flow never stores, so a lost passphrase means an unreadable file.
 - **Updates.** `git pull && ./deploy.sh` (below). Flow tells you under **Settings → Updates** when a newer release exists (the daily check above). Security fixes land on `main`; see [SECURITY.md](SECURITY.md) to report a problem.
 
 ## Scope and limits
@@ -200,6 +200,10 @@ The dashboard password, the Anthropic API key and the AI settings live in Flow's
 | `FLOW_AI_MODEL_ASK` | Model for the Assistant only (default: `FLOW_AI_MODEL`) |
 | `FLOW_AI_REDACT` | Comma-separated extra words removed from merchant names before any AI call |
 | `FLOW_AI_ENABLED` | `0` turns AI calls off even when a key is set (default: enabled) |
+| `FLOW_UPDATE_CHECK` | `0` turns the daily check for a newer release off (default: enabled) |
+| `FLOW_BACKUP_DAILY` | `0` turns the daily backup off (default: enabled) |
+| `FLOW_BACKUP_KEEP` | How many automatic backups to keep, newest first; `0` keeps all (default: 30) |
+| `FLOW_BACKUP_HOUR` | UTC hour the daily backup is taken at or after (default: 3) |
 
 **Editing `.env` by hand.** `setup.sh` writes every value in double quotes, with `\`, `"` and `$` escaped by a backslash (`FLOW_PASSWORD="pa\$word #1"`), so Docker Compose reads it exactly as typed. Do the same for any value with spaces, `$`, `#` or quotes: unquoted, Compose treats `$name` as a variable and ` #` as the start of a comment. `.env` holds your passwords and keys; `setup.sh` makes it readable by your user only (`chmod 600 .env`), and `deploy.sh` warns if it isn't.
 
@@ -259,7 +263,7 @@ flow/
 │       ├── register.py   # /api/register — cash flow register
 │       ├── cards.py      # /api/cards — credit cards and analytics
 │       ├── ask.py        # /api/ask — Assistant chat
-│       └── backup.py     # /api/backup — backups
+│       └── backup.py     # /api/backups — backups, the daily backup's settings, encrypted copies
 ├── frontend/
 │   ├── index.html        # Single-page app (vanilla JS)
 │   └── static/           # Static assets (logo, cards.js/cards.css, ask.js/ask.css, balances.js/balances.css, cashflow.js/cashflow.css, importprofiles.js/.css, accounts.css)
@@ -281,7 +285,7 @@ flow/
 | `Account` | Balance-sheet account (name, type, account numbers, ignored/archived, change alert overrides) |
 | `Balance` | Monthly balance for an account (1st of the month; typed, pasted or from a file) |
 | `BalanceMarker` | Where an account's balance sits on a pasted summary (taught by example or saved from an AI reading) |
-| `AppSetting` | Small settings table (`flow_settings`): the change alert thresholds, the AI settings |
+| `AppSetting` | Small settings table (`flow_settings`): the change alert thresholds, the AI, update-check and backup settings |
 | `AppSecret` | Flow's own secrets (`flow_secrets`): the password hash, the encrypted API key; never in a backup |
 | `RegisterAccount` | Cash flow register account (checking, savings, etc.) |
 | `ImportProfile` | An import format: how to read one file layout (columns, dates, amounts, sign) |
@@ -358,7 +362,8 @@ Files in the same batch count as history for each other, so a run of consecutive
 ```bash
 docker compose logs -f app   # live app logs
 docker compose down          # stop everything
-docker compose down -v       # stop and delete the database (destructive)
+docker compose down -v       # stop and delete the database AND the backups volume (destructive)
+docker compose cp app:/backups ./backups-copy   # copy every backup zip out of the container
 ```
 
 ## License

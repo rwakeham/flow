@@ -31,9 +31,7 @@ KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,400}$")
 
 
 def _env_locked(var: str) -> HTTPException:
-    return HTTPException(status_code=409, detail=f"{var} is set in .env and wins while it is there. Remove it "
-                                                 "from .env (./setup.sh offers to) and run ./deploy.sh, then "
-                                                 "change it here.")
+    return HTTPException(status_code=409, detail=st.env_locked_message(var))
 
 
 def settings_payload() -> dict:

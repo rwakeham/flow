@@ -26,3 +26,6 @@
   .settings-nav .sub { display: none; }
   .settings-body { padding: 12px 14px 16px; }
 }
+.settings-body .ai-env { font-size: 12px; color: var(--text-muted); margin: 4px 0 6px; }
+.settings-body .cd-check { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.settings-body .cd-check input[type=number] { width: 80px; padding: 4px 6px; }

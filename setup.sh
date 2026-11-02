@@ -351,7 +351,7 @@ fi
 # while it is there, so offer to take out what this run didn't just set.
 if [ "$VOLUME_EXISTS" -gt 0 ]; then
   LEFTOVER=""
-  for _key in FLOW_PASSWORD ANTHROPIC_API_KEY FLOW_AI_MODEL FLOW_AI_MODEL_CATEGORIZE FLOW_AI_MODEL_ASK FLOW_AI_ENABLED FLOW_AI_REDACT FLOW_UPDATE_CHECK; do
+  for _key in FLOW_PASSWORD ANTHROPIC_API_KEY FLOW_AI_MODEL FLOW_AI_MODEL_CATEGORIZE FLOW_AI_MODEL_ASK FLOW_AI_ENABLED FLOW_AI_REDACT FLOW_UPDATE_CHECK FLOW_BACKUP_DAILY FLOW_BACKUP_KEEP FLOW_BACKUP_HOUR; do
     [[ " $JUST_SET " == *" $_key "* ]] && continue
     [[ -n "$(_env_get "$_key")" ]] && LEFTOVER="${LEFTOVER} ${_key}"
   done

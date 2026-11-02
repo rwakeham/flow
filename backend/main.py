@@ -181,8 +181,13 @@ async def lifespan(app: FastAPI):
     # The daily check for a newer release runs on its own (update_check.loop: two minutes after
     # startup, then daily, skipped while the switch is off); cancelled at shutdown.
     checker = asyncio.create_task(update_check.loop(SessionLocal))
+    # The daily backup and retention (backup_service.loop: a few minutes after startup, then every
+    # 15 minutes: the day's backup once it is due and the switch is on, then the automatic backups
+    # beyond the keep count go).
+    backups = asyncio.create_task(backup_service.loop(SessionLocal))
     yield
     checker.cancel()
+    backups.cancel()
 
 
 def _read_session_epoch(db) -> int:

@@ -27,12 +27,13 @@ function settingsInject() {
         <div class="settings-row">
           <h3 style="flex:1">Backups</h3>
           <label style="cursor:pointer">
-            <input type="file" id="backup-upload-input" accept=".zip" style="display:none" onchange="doUploadBackup(this)">
+            <input type="file" id="backup-upload-input" accept=".zip,.flowbackup" style="display:none" onchange="doUploadBackup(this)">
             <span class="btn-sm settings-filebtn" onclick="document.getElementById('backup-upload-input').click()">↑ Upload</span>
           </label>
           <button class="btn-primary btn-sm" onclick="doCreateBackup()">+ New Backup</button>
         </div>
-        <p class="cd-note">Backups are stored on the server. A backup is automatically created before the first import each day.</p>
+        <div id="backup-upload-pw" class="settings-row hidden" style="margin-top:6px"></div>
+        <div id="backup-settings" class="cd-note" style="margin:6px 0 10px">Loading…</div>
         <div id="backup-list-wrap"><div class="empty" style="padding:30px 0">Loading…</div></div>
         <div class="settings-row" style="margin-top:8px">
           <button id="backup-delete-btn" onclick="doDeleteBackups()" style="color:var(--red);border-color:var(--red);display:none">Delete Selected</button>

@@ -290,10 +290,14 @@ button:hover { background: var(--surface2); }
 .trigger-auto { background: #dcfce7; color: #15803d; }
 .trigger-prerestore { background: #fef3c7; color: #92400e; }
 .trigger-uploaded { background: #f3e8ff; color: #6b21a8; }
+.trigger-scheduled { background: #e0f2fe; color: #075985; }
+.backup-pw-row.hidden { display: none; }
+.backup-pw-row td { background: var(--surface2); }
 [data-theme="dark"] .trigger-manual { background: #1e3a5f; color: #93c5fd; }
 [data-theme="dark"] .trigger-auto { background: #14532d; color: #86efac; }
 [data-theme="dark"] .trigger-prerestore { background: #451a03; color: #fcd34d; }
 [data-theme="dark"] .trigger-uploaded { background: #3b0764; color: #d8b4fe; }
+[data-theme="dark"] .trigger-scheduled { background: #0c4a6e; color: #7dd3fc; }
 
 /* ── Mobile (portrait phones / small tablets) ────────────────────────────────
    The register is a seven-column table carrying ~560px of fixed-width columns
@@ -948,7 +952,49 @@ document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key
 
 function openBackups() { settingsOpen('backups'); }
 
+// ── The daily backup's settings (GET/PUT /api/backups/settings) ──────────────
+let _backupSettings = null;
+async function renderBackupSettings() {
+  const el = document.getElementById('backup-settings');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/backups/settings');
+    if (!res.ok) throw new Error(String(res.status));
+    _backupSettings = await res.json();
+  } catch (e) { el.textContent = 'Could not read the backup settings.'; return; }
+  const b = _backupSettings, eff = b.effective;
+  const hh = h => String(h).padStart(2, '0') + ':00 UTC';
+  const env = [b.backup_daily, b.backup_keep, b.backup_hour].filter(x => x.source === 'env').map(x => x.env_var);
+  const last = b.last_scheduled ? new Date(b.last_scheduled).toLocaleString() : 'not yet';
+  const summary = (eff.daily ? `A backup is taken every day at ${hh(eff.hour)} (last: ${escHtml(last)})` : 'The daily backup is off')
+    + (eff.keep ? `, keeping the newest ${Number(eff.keep)} automatic backups` : ', keeping every automatic backup')
+    + '; a backup is also taken before the first import of a day, and before a restore. Backups you take or upload are never removed by Flow.';
+  const hours = Array.from({length: 24}, (_, h) => `<option value="${h}" ${h === eff.hour ? 'selected' : ''}>${hh(h)}</option>`).join('');
+  el.innerHTML = `<div>${summary} ${env.length ? '' : '<button type="button" class="link" onclick="backupToggleSettings()">change</button>'}</div>
+    ${env.length ? `<div class="ai-env">Set by <code>${escHtml(env.join(', '))}</code> in .env, which wins while it is there. Remove it from .env (<code>./setup.sh</code> offers to) and run <code>./deploy.sh</code> to manage it here.</div>` : ''}
+    <div id="backup-settings-form" class="settings-row hidden" style="margin-top:8px">
+      <label class="cd-check"><input type="checkbox" id="bk-daily" ${eff.daily ? 'checked' : ''}> Daily backup at</label>
+      <select id="bk-hour" style="width:auto">${hours}</select>
+      <label class="cd-check">keep the newest <input type="number" id="bk-keep" min="0" max="3650" value="${Number(eff.keep)}" style="width:80px"> automatic backups (0 keeps all)</label>
+      <button class="btn-primary btn-sm" onclick="backupSaveSettings()">Save</button>
+      <span id="bk-msg" class="cd-note"></span>
+    </div>`;
+}
+function backupToggleSettings() {
+  document.getElementById('backup-settings-form').classList.toggle('hidden');
+}
+async function backupSaveSettings() {
+  const body = {daily: document.getElementById('bk-daily').checked, hour: Number(document.getElementById('bk-hour').value),
+                keep: Number(document.getElementById('bk-keep').value)};
+  const msg = document.getElementById('bk-msg');
+  const res = await fetch('/api/backups/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { msg.textContent = typeof d.detail === 'string' ? d.detail : 'Could not save (' + res.status + ').'; return; }
+  renderBackupSettings();
+}
+
 async function loadBackupList() {
+  renderBackupSettings();
   const wrap = document.getElementById('backup-list-wrap');
   wrap.innerHTML = '<div class="empty" style="padding:30px 0">Loading…</div>';
   document.getElementById('backup-delete-btn').style.display = 'none';
@@ -964,6 +1010,7 @@ async function loadBackupList() {
     'auto-pre-import': ['Auto (pre-import)', 'trigger-auto'],
     'pre-restore': ['Auto (pre-restore)', 'trigger-prerestore'],
     'uploaded': ['Uploaded', 'trigger-uploaded'],
+    'scheduled': ['Daily', 'trigger-scheduled'],
   };
   const rows = backups.map(b => {
     const dt = new Date(b.created_at);
@@ -984,10 +1031,12 @@ async function loadBackupList() {
       <td style="text-align:right">${n(t.transactions)}</td>
       <td style="text-align:right;white-space:nowrap">${size}</td>
       <td style="white-space:nowrap">
-        <button class="btn-sm" onclick="doDownloadBackup(${escHtml(JSON.stringify(b.id))})">↓</button>
+        <button class="btn-sm" onclick="doDownloadBackup(${escHtml(JSON.stringify(b.id))})" title="The zip as it is on the server">↓</button>
+        <button class="btn-sm" onclick="backupAskPassphrase(${escHtml(JSON.stringify(b.id))})" title="A copy encrypted under a passphrase, for keeping somewhere else">↓ encrypted</button>
         <button class="btn-sm btn-primary" onclick="doRestoreBackup(${escHtml(JSON.stringify(b.id))})">Restore</button>
       </td>
-    </tr>`;
+    </tr>
+    <tr class="backup-pw-row hidden" id="backup-pw-${eid}"><td colspan="9"></td></tr>`;
   }).join('');
   wrap.innerHTML = `<table class="backup-table">
     <thead><tr>
@@ -1035,6 +1084,37 @@ function doDownloadBackup(id) {
   document.body.removeChild(a);
 }
 
+// ↓ encrypted: the passphrase is typed twice here, sent once (POST, never in a URL) and not kept.
+function backupAskPassphrase(id) {
+  document.querySelectorAll('.backup-pw-row').forEach(r => { r.classList.add('hidden'); r.firstElementChild.innerHTML = ''; });
+  const row = document.getElementById('backup-pw-' + CSS.escape(id));
+  if (!row) return;
+  row.classList.remove('hidden');
+  row.firstElementChild.innerHTML = `<div class="settings-row">
+    <input type="password" class="bk-pw" placeholder="Passphrase (8 characters or more)" autocomplete="new-password" style="width:220px">
+    <input type="password" class="bk-pw2" placeholder="Again" autocomplete="new-password" style="width:160px">
+    <button class="btn-sm btn-primary" onclick="doDownloadEncrypted(${escHtml(JSON.stringify(id))})">Download encrypted</button>
+    <button class="btn-sm" onclick="this.closest('tr').classList.add('hidden')">Cancel</button>
+    <span class="bk-pw-msg cd-note">Keep the passphrase somewhere safe: without it the file can't be opened, and Flow doesn't store it.</span></div>`;
+  row.querySelector('.bk-pw').focus();
+}
+async function doDownloadEncrypted(id) {
+  const row = document.getElementById('backup-pw-' + CSS.escape(id));
+  const pw = row.querySelector('.bk-pw').value, pw2 = row.querySelector('.bk-pw2').value, msg = row.querySelector('.bk-pw-msg');
+  if (pw.length < 8) { msg.textContent = 'Use 8 characters or more.'; return; }
+  if (pw !== pw2) { msg.textContent = 'The passphrases differ.'; return; }
+  msg.textContent = 'Encrypting…';
+  const res = await fetch(`/api/backups/${encodeURIComponent(id)}/download`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                                              body: JSON.stringify({passphrase: pw})});
+  if (!res.ok) { const d = await res.json().catch(() => ({})); msg.textContent = 'Could not encrypt: ' + (d.detail || res.status); return; }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url; a.download = id + '.flowbackup';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  row.classList.add('hidden');
+}
+
 async function doRestoreBackup(id) {
   if (!confirm('Restore this backup? All current data will be replaced. A safety backup of the current state will be created first.')) return;
   const res = await fetch(`/api/backups/${encodeURIComponent(id)}/restore`, {method:'POST'});
@@ -1060,18 +1140,34 @@ async function doDeleteBackups() {
   else alert('Delete failed');
 }
 
+// Upload: a zip goes straight up; an encrypted copy (it starts with FLOWBK1) asks for its passphrase first.
+let _backupUploadFile = null;
 async function doUploadBackup(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
+  const head = await file.slice(0, 7).text().catch(() => '');
+  if (head !== 'FLOWBK1') return backupSendUpload(file, null);
+  _backupUploadFile = file;
+  const el = document.getElementById('backup-upload-pw');
+  el.classList.remove('hidden');
+  el.innerHTML = `<input type="password" id="bk-upload-pw" placeholder="Passphrase of ${escHtml(file.name)}" autocomplete="off" style="width:280px">
+    <button class="btn-sm btn-primary" onclick="backupSendUpload(_backupUploadFile, document.getElementById('bk-upload-pw').value)">Upload</button>
+    <button class="btn-sm" onclick="document.getElementById('backup-upload-pw').classList.add('hidden')">Cancel</button>
+    <span id="bk-upload-msg" class="cd-note"></span>`;
+  document.getElementById('bk-upload-pw').focus();
+}
+async function backupSendUpload(file, passphrase) {
   const fd = new FormData();
   fd.append('file', file);
+  if (passphrase !== null) fd.append('passphrase', passphrase);
+  const msg = document.getElementById('bk-upload-msg');
+  if (msg) msg.textContent = 'Uploading…';
   const res = await fetch('/api/backups/upload', {method:'POST', body: fd});
-  if (res.ok) loadBackupList();
-  else {
-    const d = await res.json().catch(() => ({}));
-    alert('Upload failed: ' + (d.detail || res.status));
-  }
+  if (res.ok) { document.getElementById('backup-upload-pw').classList.add('hidden'); loadBackupList(); return; }
+  const d = await res.json().catch(() => ({}));
+  const text = 'Upload failed: ' + (typeof d.detail === 'string' ? d.detail : res.status);
+  if (msg && passphrase !== null) msg.textContent = text; else alert(text);
 }
 
 function toggleSignoutMenu(ev) {

@@ -85,10 +85,11 @@ frontend/               — Static frontend, served directly by the backend
 docker-compose.yml      — db (Postgres) + app (FastAPI) services
 .github/workflows/
   ci.yml                  Tests (backend, deploy.sh/setup.sh, release tooling) on pull requests and main
-  release.yml             Preview on every push and pull request; a manual run bumps the version, tags
-                          and publishes the GitHub Release (see Releases)
+  release.yml             Every push to main bumps the version, tags and publishes the GitHub Release;
+                          pull requests get a preview (see Releases)
 .github/dependabot.yml  — Weekly PRs for new base-image digests and action pins
-.github/release/        — Release tool and privacy check (see Releases)
+.github/release/        — Release tool and privacy check (see Releases); push_check.py is the pre-push hook
+.claude/settings.json   — Claude Code hooks: push_check.py runs before every git push
 setup.sh                — Config wizard; writes .env (credentials, port, first-start password, optional AI key), hands off to deploy.sh
 deploy.sh               — Deployment pipeline (see Deployment below)
 .env.example            — Template for .env
@@ -600,7 +601,7 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
   (`version.py` reads it; `test_version.py` checks it). The image carries it (`COPY . .`). It is
   shown under Sign out ▾ (`GET /api/version`, signed-in only: `/api/health` stays bare so an
   unauthenticated caller can't tell which fixes a server has) and printed by `deploy.sh`.
-- **Releases are made by the maintainer; the bump is automatic.** Don't edit `backend/VERSION` in a
+- **Every merge to `main` is a release; the bump is automatic.** Don't edit `backend/VERSION` in a
   change. The release picks the bump from the commits since the last release:
   - a `Release: major|minor|patch|none` trailer on a commit decides for that commit, so **add one
     whenever the subject alone would mislead**: `Release: major` for anything users must act on
@@ -609,12 +610,16 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
   - otherwise `BREAKING CHANGE:` in the body (or a subject starting "Breaking") means major, a
     change touching only docs, tests or CI means none, a subject starting Add / Introduce / New /
     Support / Enable / Allow means minor, and anything else patch;
-  - the release takes the highest; docs-only releases are a patch.
-- **A release is a tag on `main`**: the release run (Actions → Release → Run workflow) commits the
-  bump to `backend/VERSION` as `Release <version>`, tags that commit `v<version>` with the notes (the
-  commit subjects since the previous release, merges and the bump left out; pull request numbers
-  stay and link) and creates the GitHub Release from it. Every push and pull request runs the same
-  steps as a preview. The tool and its setup live in `.github/release/` (README there).
+  - the release takes the highest. A push that changed only docs, tests or CI (`trivial`) is not
+    released on its own: it goes out with the next user-facing change, or as a patch from a manual run.
+- **A release is a tag on `main`**: the run for a push to `main` (`release.yml`, after the tests)
+  commits the bump to `backend/VERSION` as `Release <version>`, tags that commit `v<version>` with the
+  notes (the commit subjects since the previous release, merges and the bump left out; pull request
+  numbers stay and link) and creates the GitHub Release from it. A bump pushed with the workflow token
+  starts no run, so a release never triggers itself. Actions → Release → Run workflow still works, for
+  a chosen bump or a dry run. Every pull request runs the same steps as a preview, with the denylist
+  required unless the pull request comes from a fork or Dependabot (no repository secrets there). The
+  tool and its setup live in `.github/release/` (README there).
 - **Nothing personal in the repository, ever.** The repository is public and its history is permanent:
   a privacy check runs before every release and, through `test_release.py`, over every tracked file on
   every pull request (secrets, session links, real email addresses, card-like numbers, home directory
@@ -622,6 +627,10 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
   secret). Test data and docs use synthetic values: `example.com` addresses, made-up names and
   institutions ("Example Bank"), and brands only as peers (see "Brands in code are peers"). Commit
   messages are public too: no session links, no personal detail. Commit subjects become the release
-  notes, so write them for users.
+  notes, so write them for users. **Before pushing, run `python3 .github/release/release.py preview`**
+  (the Claude Code hook in `.claude/settings.json` runs it before every `git push` and refuses the
+  push on a finding; the denylist is read from `$PUBLISH_DENYLIST` or `$PUBLISH_DENYLIST_FILE` when
+  set, else CI applies it on the pull request). A denylist hit means the term comes out of the tree,
+  never the entry out of the list.
 - **Actions are pinned by commit** (`uses: owner/action@<sha> # vX.Y.Z`), like the base images;
   Dependabot proposes updates.

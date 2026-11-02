@@ -117,6 +117,9 @@ def join_numbers(nums: list[str]) -> str | None:
 # ── Paste extraction ─────────────────────────────────────────────────────────
 
 MAX_PASTE_CHARS = 60_000
+# A label is cut to 80 characters, but _INSTITUTION_TAIL is quadratic in its input (a 60,000-character
+# line of capitalized words took 7 s), so clean_label looks at no more than this many.
+LABEL_SCAN_CHARS = 1_000
 
 # "Account number ending in...1234", "ending in 1234", "x1234", "****1234", "...1234", "(…1234)".
 _ANCHOR = re.compile(
@@ -175,7 +178,7 @@ def _clean_line(line: str) -> str:
 
 
 def clean_label(line: str) -> str:
-    s = _LIST_MARK.sub("", _clean_line(line))
+    s = _LIST_MARK.sub("", _clean_line(line))[:LABEL_SCAN_CHARS]
     s = _INSTITUTION_TAIL.sub("", s).strip(" ,-")
     return s[:80]
 

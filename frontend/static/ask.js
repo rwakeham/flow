@@ -277,7 +277,7 @@ function askRenderLog() {
     log.append(askEl('div', {class: 'ask-empty'},
       'Ask about your card spending and cash accounts, or ask it to organize things ("Maple Street Studio is my ' +
       'pottery class, not shopping"); changes come back as proposals you apply. Answers come only from Flow\'s data; Claude sees summaries ' +
-      'with cards shown as "Card A", and every request is in the AI privacy log (AI in the top bar).'));
+      'with cards shown as "Card A", and every request is in the AI privacy log (Settings → AI in the top bar).'));
     const sug = askEl('div', {class: 'ask-suggest'}, askEl('div', {class: 'lbl'}, 'Try'));
     askSuggestions().forEach(q => sug.append(askEl('button', {onclick: () => askSend(q)}, q)));
     log.append(sug);

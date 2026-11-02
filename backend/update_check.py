@@ -1,11 +1,11 @@
 """
 Update check: once a day Flow asks GitHub for its newest release and, when it is newer than the
-version running, says so under Sign out ▾ (a dot on the button; the version line in the menu
+version running, says so under Settings → Updates (a dot on the Settings button; the version line there
 links to the release). The check never installs anything: updating stays ``git pull && ./deploy.sh``.
 
 What leaves the machine: one GET to api.github.com for this repository's latest release, with
 nothing about the user or their data; GitHub sees the server's address and a plain User-Agent,
-as for any visit to the site. The check is on by default and switched off under Sign out ▾
+as for any visit to the site. The check is on by default and switched off under Settings → Updates
 (``flow_settings`` ``update_check``) or with ``FLOW_UPDATE_CHECK=0`` in .env, which wins while
 it is there. "Check for updates" in that menu runs it by hand, switch or no switch.
 

@@ -37,7 +37,7 @@ You should get an acknowledgement within a week. Once a fix is ready it is relea
 
 ## Supported versions
 
-Only the latest release is supported (the version is at the bottom of the **Sign out ▾** menu). Update with `git pull && ./deploy.sh` before reporting, in case the problem is already fixed. Security fixes ship as a new release, listed on the Releases page.
+Only the latest release is supported (the version is under **Settings → Updates**). Update with `git pull && ./deploy.sh` before reporting, in case the problem is already fixed. Security fixes ship as a new release, listed on the Releases page.
 
 ## Scope
 

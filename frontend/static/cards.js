@@ -1238,7 +1238,7 @@ async function cdRenderInsights(panel, reportId) {
       <button class="btn-primary" id="cd-ins-gen" onclick="cdGenerateInsights()" ${status.enabled && !status.problem ? '' : 'disabled'}>Generate insights ▸</button>
       <select id="cd-ins-past" onchange="cdShowInsight(this.value)"><option value="">Past reports…</option>
         ${past.map(p => `<option value="${p.id}">${new Date(p.created_at).toLocaleString()} · ${h((p.headline || '').slice(0, 60))}</option>`).join('')}</select>
-      <span class="cd-note"${status.problem ? ' style="color:var(--red)"' : ''}>${status.problem ? `⚠ ${h(status.problem.message)} Update the key under AI in the top bar.` : status.enabled ? `Uses ${h(status.model)} with the cards and period selected above. Only aggregate tables are sent.` : h(status.reason)}</span>
+      <span class="cd-note"${status.problem ? ' style="color:var(--red)"' : ''}>${status.problem ? `⚠ ${h(status.problem.message)} Update the key under Settings → AI.` : status.enabled ? `Uses ${h(status.model)} with the cards and period selected above. Only aggregate tables are sent.` : h(status.reason)}</span>
     </div>
     <div id="cd-ins-body">${past.length ? '' : '<div class="empty"><h3>No reports yet</h3><p>Generate a report to get findings and recommended actions from your spending totals.</p></div>'}</div>`;
   const pick = reportId || (past[0] && past[0].id);
@@ -1308,10 +1308,10 @@ async function cdRenderSettings(panel) {
       ${status.enabled ? `<button class="btn-sm" onclick="cdRunAi()" ${status.running ? 'disabled' : ''}>${status.running ? 'Running…' : 'Re-run AI'}</button>` : ''}</div>
       <div class="cd-card-b cd-note">
         ${status.enabled ? `On, using <strong>${h(status.categorize_model || status.model)}</strong>. ${status.pending_merchants} merchant${status.pending_merchants === 1 ? '' : 's'} waiting.` : h(status.reason)}
-        ${status.problem ? `<br><span style="color:var(--red)">⚠ Paused since ${new Date(status.problem.at).toLocaleString()}: ${h(status.problem.message)} Automatic categorization stops until the key is updated under AI in the top bar; "Re-run AI" tries the current key once.</span>` : ''}
+        ${status.problem ? `<br><span style="color:var(--red)">⚠ Paused since ${new Date(status.problem.at).toLocaleString()}: ${h(status.problem.message)} Automatic categorization stops until the key is updated under Settings → AI; "Re-run AI" tries the current key once.</span>` : ''}
         ${last ? `<br>Last run ${new Date(last.at).toLocaleString()}: sent ${last.sent} merchant names, categorized ${last.classified}, updated ${last.transactions_updated} transactions${last.reused ? `, and reused stored categories for ${last.reused} more without a call` : ''}.${last.error ? ' <span style="color:var(--red)">' + h(last.error) + '</span>' : ''}` : ''}
         <br>Only sanitized merchant names, the issuer's category label and the payment processor are sent: never amounts, dates, card or account details, names, or full descriptions. Each merchant is sent once; answers are cached, and other spellings of a cached merchant (CIRCLE_K, Circle K, a truncated name) reuse the stored answer.
-        <br><button class="btn-sm" style="margin-top:6px" onclick="aiOpen()">AI models and privacy log…</button> (also <strong>AI</strong> in the top bar)
+        <br><button class="btn-sm" style="margin-top:6px" onclick="aiOpen()">AI models and privacy log…</button> (also <strong>Settings → AI</strong> in the top bar)
       </div></div>
 
     <div class="cd-card"><div class="cd-card-h"><span class="grow">Your categories</span>
@@ -1489,7 +1489,7 @@ async function cdPollAi(start) {
     banner.innerHTML = `<span title="${h(s.reason)}">AI categorization off</span>`;
   } else if (s.problem && !s.running) {
     banner.className = 'cd-banner warn';
-    banner.innerHTML = `⚠ AI paused: ${h(s.problem.message)} Update the key under AI in the top bar.
+    banner.innerHTML = `⚠ AI paused: ${h(s.problem.message)} Update the key under Settings → AI.
       <button class="btn-sm" onclick="cdRunAi()" title="Try the configured key once">Try again</button>`;
   } else if (s.running) {
     banner.innerHTML = '✦ Categorizing merchants with AI…';

@@ -135,7 +135,7 @@ if [[ -n "${MISSING// /}" ]]; then
 fi
 
 # The dashboard password and the Anthropic API key live in Flow's database once it has
-# started (set under Sign out ▾ → Change password and AI in the top bar). FLOW_PASSWORD in
+# started (set under Settings → Account and Settings → AI in Flow). FLOW_PASSWORD in
 # .env is needed for the first start only, and resets the password while it stays there;
 # ANTHROPIC_API_KEY likewise sets the key. Whether this is a first start: no database volume
 # yet (found by Compose's labels, as setup.sh does; the project name follows the directory).
@@ -170,7 +170,7 @@ if [[ -n "$_PG_VOLUMES" ]]; then
   done
   if [[ -n "${_KEPT// /}" ]]; then
     info "Still in .env, so copied into Flow at every start and winning while there:${_KEPT}"
-    info "Flow keeps these itself (AI in the top bar; Sign out ▾ → Change password): ./setup.sh offers to remove them."
+    info "Flow keeps these itself (Settings → AI and Settings → Account in Flow): ./setup.sh offers to remove them."
   fi
 fi
 

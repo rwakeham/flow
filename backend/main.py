@@ -345,7 +345,7 @@ class ChangePasswordRequest(BaseModel):
 
 @app.post("/api/auth/change-password", dependencies=[Depends(require_auth)])
 def change_password(body: ChangePasswordRequest, response: Response):
-    """Sign out ▾ → Change password: the current password is required, and every session ends
+    """Settings → Account → Change password: the current password is required, and every session ends
     (the cookie tag covers the password hash), this one included."""
     if settings_store.password_source() == "env":
         raise HTTPException(status_code=409, detail="FLOW_PASSWORD is set in .env and would put the old "

@@ -18,13 +18,13 @@ cd flow
 ./setup.sh
 ```
 
-`setup.sh` generates the database password and secret key, picks a free port, asks for a dashboard password, offers to add your Anthropic API key for the optional AI features (press Enter to skip; **AI** in the top bar takes it later, with the models and other AI settings), then builds and starts Flow and prints its URL. Open it, sign in, and:
+`setup.sh` generates the database password and secret key, picks a free port, asks for a dashboard password, offers to add your Anthropic API key for the optional AI features (press Enter to skip; **Settings → AI** takes it later, with the models and other AI settings), then builds and starts Flow and prints its URL. Open it, sign in, and:
 
 1. **Add your accounts.** Cash accounts (checking, savings) under **Cash Flow → + New cash account**; credit cards under **Cards → + New card account**; investments, property and loans with **+ New balance account** at the bottom of the Dashboard.
 2. **Import a statement.** **↑ Import** in the top bar, pick the account and choose your bank's CSV, TSV or XLSX export. The first file of each layout opens the format editor with a suggested mapping; check it and save, and later files from that bank import straight away.
 3. **Update balances each month** by pasting your bank's account summary page, typing values or importing a holdings export.
 
-Change the password under **Sign out ▾ → Change password** and the AI settings under **AI**; run `git pull && ./deploy.sh` to update (see [Deploying Updates](#deploying-updates)). Keep Flow on a private network (see [Running it safely](#running-it-safely)).
+Change the password under **Settings → Account** and the AI settings under **Settings → AI**; run `git pull && ./deploy.sh` to update (see [Deploying Updates](#deploying-updates)). Keep Flow on a private network (see [Running it safely](#running-it-safely)).
 
 ## Features
 
@@ -87,18 +87,19 @@ Change the password under **Sign out ▾ → Change password** and the AI settin
 - Attach a statement file (📎 or drag and drop) and it proposes an import format for it; it sees only the file's column shapes and cleaned headers, never a value, and the proposal opens in the format editor for you to check and save
 - The conversation lives only in the browser tab; New chat clears it
 
-**Privacy of AI features.** Every request and response is logged in full (the data sent, the whole request, and the whole reply) in the **AI privacy log** (**AI** in the top bar, which also shows the model each feature uses). Categorization sends only sanitized merchant names (store numbers, phone numbers, cities, cardholder names and other identifiers removed), the issuer's category label and the payment processor. It never sends amounts, dates, card or account details, or full descriptions. Each merchant is sent once and the answer is cached. Insights send aggregate tables with cards renamed "Card A", "Card B". The Assistant sends your question, the earlier messages of the chat, and summaries it looks up (totals by category, merchant, month and so on), with cards and cash accounts renamed "Card A", "Account A" and merchant names cleaned; transfers to people keep only the service ("Zelle transfer"). Single transactions (date, cleaned merchant, amount, category) are sent only for questions about specific charges, at most 25 at a time. An attached file is sent only as its outline: per column, a type (date, money, text and so on) and the header with every word outside a small vocabulary replaced by `~`. Names Flow can't recognise as names, such as a payee you typed by hand, may be sent; add them to the extra redact words under **AI** to withhold them. Without an API key nothing is sent at all. If the key expires or is revoked (or the account can't be billed), imports keep working, automatic AI calls pause, and the Cards page shows an "AI paused" banner until the key is replaced under **AI** (**Test the key** there makes one tiny request to check it).
+**Privacy of AI features.** Every request and response is logged in full (the data sent, the whole request, and the whole reply) in the **AI privacy log** (**Settings → AI** in the top bar, which also shows the model each feature uses). Categorization sends only sanitized merchant names (store numbers, phone numbers, cities, cardholder names and other identifiers removed), the issuer's category label and the payment processor. It never sends amounts, dates, card or account details, or full descriptions. Each merchant is sent once and the answer is cached. Insights send aggregate tables with cards renamed "Card A", "Card B". The Assistant sends your question, the earlier messages of the chat, and summaries it looks up (totals by category, merchant, month and so on), with cards and cash accounts renamed "Card A", "Account A" and merchant names cleaned; transfers to people keep only the service ("Zelle transfer"). Single transactions (date, cleaned merchant, amount, category) are sent only for questions about specific charges, at most 25 at a time. An attached file is sent only as its outline: per column, a type (date, money, text and so on) and the header with every word outside a small vocabulary replaced by `~`. Names Flow can't recognise as names, such as a payee you typed by hand, may be sent; add them to the extra redact words under **Settings → AI** to withhold them. Without an API key nothing is sent at all. If the key expires or is revoked (or the account can't be billed), imports keep working, automatic AI calls pause, and the Cards page shows an "AI paused" banner until the key is replaced under **Settings → AI** (**Test the key** there makes one tiny request to check it).
 
 **General**
 - Single-password authentication with session cookie
+- **⚙ Settings** in the top bar: AI (key, models, privacy log), Backups, Updates (version, check now, the daily switch) and Account (change the password); **Sign out ▾** signs out here or everywhere
 - Dark mode support
 - Fully self-hosted: no accounts or telemetry, and the one call Flow makes on its own, a daily check for a newer release, can be switched off (see [What leaves your machine](#what-leaves-your-machine))
 
 ## What leaves your machine
 
-- **Nothing about your data, unless you turn on AI.** Without an Anthropic API key (entered under **AI** in the top bar, or by `setup.sh` for the first start), Flow makes no outside calls with your data. With a key, the AI features send what the privacy paragraph above describes to the Anthropic API, and every request and response is logged in the **AI privacy log** (**AI** in the top bar). The **AI calls on** switch there turns the calls off while keeping the key.
+- **Nothing about your data, unless you turn on AI.** Without an Anthropic API key (entered under **Settings → AI**, or by `setup.sh` for the first start), Flow makes no outside calls with your data. With a key, the AI features send what the privacy paragraph above describes to the Anthropic API, and every request and response is logged in the **AI privacy log** (**AI** in the top bar). The **AI calls on** switch there turns the calls off while keeping the key.
 - **No outside scripts.** The charting library (Chart.js, MIT) ships with Flow in `frontend/static/vendor`, so the browser loads everything from your server.
-- **A daily check for a newer release.** Once a day Flow asks GitHub (`api.github.com`) for its latest release and, when it is newer than the one running, shows it under **Sign out ▾**: a dot on the button, and in the menu the version with a link to the release notes. Nothing about you or your data is sent; GitHub sees the request as it would any visit to the site, from your server's address. **Sign out ▾ → Check for updates** runs it by hand, and the same menu turns the daily check off (or set `FLOW_UPDATE_CHECK=0` in `.env`). Flow never installs an update itself: that stays `git pull && ./deploy.sh`.
+- **A daily check for a newer release.** Once a day Flow asks GitHub (`api.github.com`) for its latest release and, when it is newer than the one running, shows it under **Settings → Updates**: a dot on the Settings button, and in that section the version with a link to the release notes. Nothing about you or your data is sent; GitHub sees the request as it would any visit to the site, from your server's address. **Check for updates** there runs it by hand, and the same section turns the daily check off (or set `FLOW_UPDATE_CHECK=0` in `.env`). Flow never installs an update itself: that stays `git pull && ./deploy.sh`.
 - **Nothing else**: no analytics, no error reporting.
 
 ## Security
@@ -119,8 +120,8 @@ Change the password under **Sign out ▾ → Change password** and the AI settin
 - **One password.** Anyone with it sees everything. Choose a long one; `setup.sh` can change it later, and changing it signs every browser out. **Sign out** ends that browser's session (a copy of its cookie stops working too); **Sign out ▾ → Sign out everywhere** ends every session without a password change, for a lost device or a browser you forgot to sign out of.
 - **If the login lock trips on its own.** Failed logins are counted per client address. On Docker Desktop (Mac and Windows), and for connections that reach the container through Docker's userland proxy (IPv6, `localhost`), every device on your network can arrive from the same internal address, so five wrong passwords from any one of them lock everyone out for five minutes. Set `FLOW_TRUSTED_PROXIES` to that address range (for example `172.16.0.0/12`) only if a reverse proxy in front of Flow sends `X-Forwarded-For`; otherwise the lock simply clears itself after five minutes, and keeping Flow on a network you trust is the fix.
 - **Other web apps on the same host name.** Flow refuses a change request that the browser says came from another origin, including another port on the same host, so a page from another app on the machine can't act with your cookie. Reads need the password either way.
-- **Backups hold everything.** A backup zip (Backups in the top bar) contains all your data in plain JSON. Store downloads somewhere you'd keep bank statements.
-- **Updates.** `git pull && ./deploy.sh` (below). Flow tells you under **Sign out ▾** when a newer release exists (the daily check above). Security fixes land on `main`; see [SECURITY.md](SECURITY.md) to report a problem.
+- **Backups hold everything.** A backup zip (**Settings → Backups**) contains all your data in plain JSON. Store downloads somewhere you'd keep bank statements.
+- **Updates.** `git pull && ./deploy.sh` (below). Flow tells you under **Settings → Updates** when a newer release exists (the daily check above). Security fixes land on `main`; see [SECURITY.md](SECURITY.md) to report a problem.
 
 ## Scope and limits
 
@@ -150,7 +151,7 @@ cd flow
 2. Generate a random database password and secret key and save them to `.env` (if a database volume already exists, it asks for the original password instead)
 3. Find a free port (default 8000) and save it to `.env`
 4. Prompt you to set a dashboard password (any characters, spaces included). It is used for the first start; Flow then keeps it itself, as a hash in its database
-5. Offer to add your Anthropic API key (typed hidden) for the optional AI features. Press Enter to skip; the key, the model for each feature, the on/off switch and the words to strip from merchant names are all set under **AI** in Flow's top bar, and without a key nothing is ever sent
+5. Offer to add your Anthropic API key (typed hidden) for the optional AI features. Press Enter to skip; the key, the model for each feature, the on/off switch and the words to strip from merchant names are all set under **Settings → AI**, and without a key nothing is ever sent
 6. Hand off to `./deploy.sh`, which builds and starts the containers, waits for them to be healthy and prints the URL
 
 Re-running `setup.sh` is safe: it keeps your existing secrets and offers to reset the password or set a key from there. Once Flow has started, those two values and the AI settings live in Flow's database and are managed in the app; `setup.sh` offers to remove any still in `.env`, where they would be copied in again at every start and win while they stay (which is also how a forgotten password is reset: set `FLOW_PASSWORD` in `.env`, run `./deploy.sh`, then remove it). From the host, `docker compose exec app python reset_password.py` does the same without touching `.env`.
@@ -169,9 +170,9 @@ git pull
 
 ## Versions and releases
 
-Flow's version (`MAJOR.MINOR.PATCH`) is shown at the bottom of the **Sign out ▾** menu and printed by `deploy.sh`. Each release is listed on the [Releases page](https://github.com/rwakeham/flow/releases) with what changed.
+Flow's version (`MAJOR.MINOR.PATCH`) is shown under **Settings → Updates** and printed by `deploy.sh`. Each release is listed on the [Releases page](https://github.com/rwakeham/flow/releases) with what changed.
 
-- **Know when there is one**: Flow checks GitHub once a day and, when a newer release exists, puts a dot on **Sign out ▾**; the menu shows the version with a link to its notes. **Check for updates** there asks right away, **hide** keeps a release quiet until the next one, and the same menu turns the daily check off. Flow never updates itself.
+- **Know when there is one**: Flow checks GitHub once a day and, when a newer release exists, puts a dot on **Settings**; **Settings → Updates** shows the version with a link to its notes. **Check for updates** there asks right away, **hide** keeps a release quiet until the next one, and the same menu turns the daily check off. Flow never updates itself.
 - **Follow `main`**: `git pull && ./deploy.sh`. Every merge to `main` passes the tests and the privacy check; releases are tagged points on it.
 - **Stay on one release**: `git fetch --tags && git checkout v3.0.0 && ./deploy.sh`. Go back to following releases with `git checkout main && git pull && ./deploy.sh`.
 - **Read the notes before a new major version** (3.x to 4.0): a major version is one that asks something of you, such as a new `.env` setting. Patch and minor releases (fixes and features) never do. Back up first anyway (**Backups** in the top bar).
@@ -193,7 +194,7 @@ The dashboard password, the Anthropic API key and the AI settings live in Flow's
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | The Anthropic API key (otherwise entered under **AI**) |
+| `ANTHROPIC_API_KEY` | The Anthropic API key (otherwise entered under **Settings → AI**) |
 | `FLOW_AI_MODEL` | Claude model for every AI feature (default: `claude-sonnet-5-5`) |
 | `FLOW_AI_MODEL_CATEGORIZE` | Model for merchant categorization only, e.g. `claude-haiku-5-5` (default: `FLOW_AI_MODEL`) |
 | `FLOW_AI_MODEL_ASK` | Model for the Assistant only (default: `FLOW_AI_MODEL`) |

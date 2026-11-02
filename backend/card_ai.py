@@ -106,9 +106,9 @@ def disabled_reason() -> str | None:
         return "AI calls are switched off."
     if settings_store.api_key_unreadable():
         return ("The saved API key can't be read: SECRET_KEY changed since it was saved. "
-                "Enter the key again under AI in the top bar.")
+                "Enter the key again under Settings → AI.")
     if not settings_store.api_key():
-        return "No Anthropic API key is set (AI in the top bar), so nothing is sent to the AI."
+        return "No Anthropic API key is set (Settings → AI in the top bar), so nothing is sent to the AI."
     return None
 
 

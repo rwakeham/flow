@@ -74,13 +74,7 @@ button:hover { background: var(--surface2); }
   border-radius: var(--radius-sm); cursor: pointer; color: var(--text); }
 .signout-menu button:hover { background: var(--surface2); }
 .signout-menu .sub { display: block; font-size: 11px; color: var(--text-muted); }
-.signout-menu .app-version { font-size: 11px; color: var(--text-muted); padding: 6px 10px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
-.signout-menu .app-version:empty { display: none; }
-.signout-menu .app-version a { color: var(--accent); }
-.signout-menu .app-version button.link { display: inline; width: auto; padding: 0 2px; font-size: 11px;
-  color: var(--accent); text-decoration: underline; }
-.signout-menu .app-version code { font-size: 11px; }
-#signout-btn.has-update::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+#settings-btn.has-update::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent); margin-left: 6px; vertical-align: middle; }
 #topbar {
   background: var(--surface); border-bottom: 1px solid var(--border);
@@ -285,13 +279,7 @@ button:hover { background: var(--surface2); }
 .reg-pagination button { padding: 3px 10px; font-size: 12px; }
 .reg-pagination .page-info { flex: 1; text-align: center; }
 
-/* ── Backup modal ── */
-#backup-modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-  display: flex; align-items: center; justify-content: center; z-index: 500;
-}
-#backup-modal.hidden { display: none; }
-#backup-modal .modal-box { width: 800px; max-width: 95vw; max-height: 85vh; overflow-y: auto; }
+/* ── Backups (Settings → Backups) ── */
 .backup-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .backup-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
 .backup-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -353,10 +341,10 @@ button:hover { background: var(--surface2); }
 
   /* Modals — fit the viewport rather than overflow it. */
   #unified-import-modal, #add-txn-modal,
-  #add-to-ledger-modal, #manage-acct-modal, #backup-modal {
+  #add-to-ledger-modal, #manage-acct-modal, #settings-modal {
     align-items: flex-start; padding: 12px; overflow-y: auto;
   }
-  .modal-box, #backup-modal .modal-box {
+  .modal-box, #settings-modal .modal-box {
     width: 100%; max-width: 100%; padding: 20px;
     max-height: calc(100vh - 24px); overflow-y: auto;
   }
@@ -469,6 +457,7 @@ button:hover { background: var(--surface2); }
 <link rel="stylesheet" href="/static/balances.css">
 <link rel="stylesheet" href="/static/cashflow.css">
 <link rel="stylesheet" href="/static/ai.css">
+<link rel="stylesheet" href="/static/settings.css">
 </head>
 <body>
 
@@ -666,40 +655,6 @@ button:hover { background: var(--surface2); }
   </div>
 </div>
 
-<!-- Backup modal -->
-<div id="pw-modal" class="cd-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pw-title">
-  <div class="modal-box">
-    <h2 id="pw-title">Change password</h2>
-    <p class="cd-note" style="margin:4px 0 10px">The dashboard password is kept on this server as a hash. Changing it ends every session, this one included.</p>
-    <label class="f">Current password</label><input type="password" id="pw-current" autocomplete="current-password">
-    <label class="f" style="margin-top:8px">New password</label><input type="password" id="pw-new" autocomplete="new-password">
-    <label class="f" style="margin-top:8px">New password again</label><input type="password" id="pw-new2" autocomplete="new-password">
-    <div id="pw-err" class="err" style="margin-top:8px;min-height:16px"></div>
-    <div class="modal-footer"><button onclick="closeChangePassword()">Cancel</button><button class="btn-primary" onclick="doChangePassword()">Change password</button></div>
-  </div>
-</div>
-
-<div id="backup-modal" class="hidden">
-  <div class="modal-box">
-    <div style="display:flex;align-items:center;gap:8px">
-      <h2 style="flex:1">Backups</h2>
-      <label style="cursor:pointer">
-        <input type="file" id="backup-upload-input" accept=".zip" style="display:none" onchange="doUploadBackup(this)">
-        <span class="btn-sm" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" onclick="document.getElementById('backup-upload-input').click()">↑ Upload</span>
-      </label>
-      <button class="btn-primary btn-sm" onclick="doCreateBackup()">+ New Backup</button>
-    </div>
-    <p>Backups are stored on the server. A backup is automatically created before the first import each day.</p>
-    <div id="backup-list-wrap">
-      <div class="empty" style="padding:30px 0">Loading…</div>
-    </div>
-    <div class="modal-footer" style="justify-content:space-between;margin-top:4px">
-      <button id="backup-delete-btn" onclick="doDeleteBackups()" style="color:var(--red);border-color:var(--red);display:none">Delete Selected</button>
-      <button onclick="closeBackups()">Close</button>
-    </div>
-  </div>
-</div>
-
 <!-- Top bar -->
 <div id="topbar">
   <a href="/" class="logo-link" title="Reload Flow" onclick="return reloadApp(event)"><img src="/static/logo.png" alt="Flow" class="logo"></a>
@@ -711,16 +666,12 @@ button:hover { background: var(--surface2); }
   <button id="ask-btn" class="hidden" title="Ask about your spending, or have it organize things for you">Assistant</button>
   <button onclick="openImport()">↑ Import</button>
   <button id="theme-btn" onclick="toggleTheme()">◑</button>
-  <button onclick="aiOpen()" title="Whether AI is on, which model each feature uses, and every request sent">AI</button>
-  <button onclick="openBackups()">Backups</button>
+  <button id="settings-btn" onclick="settingsOpen()" title="AI, backups, updates and the password">⚙ Settings</button>
   <div class="signout-wrap">
     <button id="signout-btn" onclick="toggleSignoutMenu(event)" aria-haspopup="true" aria-expanded="false">Sign out ▾</button>
     <div id="signout-menu" class="signout-menu hidden" role="menu">
       <button role="menuitem" onclick="doLogout()">Sign out</button>
       <button role="menuitem" onclick="doLogoutEverywhere()">Sign out everywhere<span class="sub">every browser and device, this one too</span></button>
-      <button role="menuitem" onclick="openChangePassword()">Change password…<span class="sub">signs every browser out</span></button>
-      <button role="menuitem" onclick="checkForUpdates()" title="Asks GitHub for Flow's newest release now; nothing about your data is sent">Check for updates<span class="sub" id="update-check-sub"></span></button>
-      <div id="app-version" class="app-version"></div>
     </div>
   </div>
 </div>
@@ -993,16 +944,9 @@ async function doLogin() {
 }
 document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
-// ── Backup modal ─────────────────────────────────────────────────────────────
+// ── Backups (Settings → Backups; the section's markup is in static/settings.js) ──────────────
 
-function openBackups() {
-  document.getElementById('backup-modal').classList.remove('hidden');
-  loadBackupList();
-}
-
-function closeBackups() {
-  document.getElementById('backup-modal').classList.add('hidden');
-}
+function openBackups() { settingsOpen('backups'); }
 
 async function loadBackupList() {
   const wrap = document.getElementById('backup-list-wrap');
@@ -1074,7 +1018,7 @@ function toggleAllBackups(cb) {
 }
 
 async function doCreateBackup() {
-  const btn = document.querySelector('#backup-modal button.btn-primary[onclick="doCreateBackup()"]');
+  const btn = document.querySelector('#settings-backups button.btn-primary[onclick="doCreateBackup()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
   const res = await fetch('/api/backups', {method:'POST'});
   if (btn) { btn.disabled = false; btn.textContent = '+ New Backup'; }
@@ -1135,11 +1079,10 @@ function toggleSignoutMenu(ev) {
   const menu = document.getElementById('signout-menu');
   const open = menu.classList.toggle('hidden') === false;
   document.getElementById('signout-btn').setAttribute('aria-expanded', String(open));
-  if (open) loadVersionInfo();
 }
-// The running version (backend/VERSION) and the update check, under the Sign out menu
-// (GET /api/version). Fetched when the menu opens, and once after sign-in for the dot on the
-// button that says a newer release is known.
+// The running version (backend/VERSION) and the update check, under Settings → Updates
+// (GET /api/version). Fetched when that section opens, and once after sign-in for the dot on
+// the Settings button that says a newer release is known.
 let _versionInfo = null;
 async function loadVersionInfo() {
   try {
@@ -1150,24 +1093,27 @@ async function loadVersionInfo() {
 }
 function renderVersionInfo() {
   const v = _versionInfo, u = (v && v.update) || {};
-  document.getElementById('signout-btn').classList.toggle('has-update', !!u.update);
+  document.getElementById('settings-btn').classList.toggle('has-update', !!u.update);
   const el = document.getElementById('app-version');
-  if (!v) { el.textContent = ''; return; }
-  let html = 'Flow ' + escHtml(v.version || 'unknown');
+  if (!el) return;                       // the Settings dialog hasn't been opened yet: only the dot
+  if (!v) { el.textContent = 'Could not read the version.'; return; }
+  let html = '<strong>Flow ' + escHtml(v.version || 'unknown') + '</strong>';
   if (u.update) {
-    html += ' · <a href="' + escHtml(u.update.url) + '" target="_blank" rel="noopener">' + escHtml(u.update.version) + ' available</a>'
-      + ' <button type="button" class="link" onclick="dismissUpdate(' + escHtml(JSON.stringify(u.update.version)) + ')" title="Hide this until the next release">hide</button>'
-      + '<span class="sub">Update: <code>git pull &amp;&amp; ./deploy.sh</code></span>';
+    html += '<span class="sub"><a href="' + escHtml(u.update.url) + '" target="_blank" rel="noopener">Flow ' + escHtml(u.update.version) + ' is available</a>'
+      + (u.update.published ? ' (' + escHtml(String(u.update.published).slice(0, 10)) + ')' : '')
+      + ' · <button type="button" class="link" onclick="dismissUpdate(' + escHtml(JSON.stringify(u.update.version)) + ')" title="Hide this until the next release">hide</button></span>';
+  } else if (u.checked_at) {
+    html += '<span class="sub">No newer release known (last checked ' + new Date(u.checked_at).toLocaleString() + ').</span>';
   }
   if (u.source === 'env') {
-    html += '<span class="sub">Daily check ' + (u.enabled ? 'on' : 'off') + ', set by .env</span>';
+    html += '<span class="sub">Daily check for a newer release ' + (u.enabled ? 'on' : 'off') + ', set by FLOW_UPDATE_CHECK in .env.</span>';
   } else {
-    html += '<span class="sub">' + (u.enabled ? 'Checks GitHub daily' : 'Daily check off')
-      + ' · <button type="button" class="link" onclick="toggleUpdateCheck()">turn ' + (u.enabled ? 'off' : 'on') + '</button></span>';
+    html += '<span class="sub">' + (u.enabled ? 'Flow asks GitHub once a day whether a newer release exists; nothing about your data is sent.' : 'The daily check for a newer release is off.')
+      + ' <button type="button" class="link" onclick="toggleUpdateCheck()">Turn it ' + (u.enabled ? 'off' : 'on') + '</button></span>';
   }
   el.innerHTML = html;
 }
-// Sign out ▾ → Check for updates: one check now, whatever the daily switch says.
+// Settings → Updates → Check for updates: one check now, whatever the daily switch says.
 async function checkForUpdates() {
   const sub = document.getElementById('update-check-sub');
   sub.textContent = 'Checking…';
@@ -1223,15 +1169,8 @@ async function doLogout() {
   _showLogin();
 }
 
-// Sign out ▾ → Change password (POST /api/auth/change-password: the current password is required).
-function openChangePassword() {
-  document.getElementById('signout-menu').classList.add('hidden');
-  for (const id of ['pw-current', 'pw-new', 'pw-new2']) document.getElementById(id).value = '';
-  document.getElementById('pw-err').textContent = '';
-  document.getElementById('pw-modal').classList.remove('hidden');
-  document.getElementById('pw-current').focus();
-}
-function closeChangePassword() { document.getElementById('pw-modal').classList.add('hidden'); }
+// Settings → Account → Change password (POST /api/auth/change-password: the current password is required).
+function openChangePassword() { settingsOpen('account'); }
 async function doChangePassword() {
   const err = document.getElementById('pw-err');
   const current = document.getElementById('pw-current').value, nw = document.getElementById('pw-new').value;
@@ -1241,12 +1180,13 @@ async function doChangePassword() {
                                                          body: JSON.stringify({current, new: nw})});
   const d = await res.json().catch(() => ({}));
   if (!res.ok) { err.textContent = typeof d.detail === 'string' ? d.detail : 'Could not change the password (' + res.status + ').'; return; }
-  closeChangePassword();
+  settingsResetPassword();
   alert('Password changed. Sign in again with the new one.');
   _showLogin();
 }
 
 function _showLogin() {
+  if (typeof settingsClose === 'function') settingsClose();
   for (const [name, id] of Object.entries(SECTIONS)) {
     document.getElementById(id).classList.add('hidden');
     document.getElementById('nav-' + name).classList.toggle('active', name === 'dashboard');
@@ -3318,5 +3258,6 @@ async function doRecRejectPending(bankId) {
 <script src="/static/cashflow.js"></script>
 <script src="/static/ask.js"></script>
 <script src="/static/ai.js"></script>
+<script src="/static/settings.js"></script>
 </body>
 </html>

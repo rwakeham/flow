@@ -83,7 +83,8 @@ frontend/               — Static frontend, served directly by the backend
                           (the Cards section UI), balances.js / balances.css (Update balances and the
                           account editor), cashflow.js / cashflow.css (Dashboard → Cash Flow Analysis), importprofiles.js / .css (import formats in the
                           import dialog), accounts.css (the shared account-dialog frame), ask.js / ask.css
-                          (the Assistant panel) and ai.js / ai.css (top bar → AI: models and privacy log), loaded
+                          (the Assistant panel), ai.js / ai.css (Settings → AI: models and privacy log) and settings.js /
+                          settings.css (the ⚙ Settings dialog: AI, Backups, Updates, Account sections), loaded
                           after index.html's inline script; vendor/ holds Chart.js (MIT)
 docker-compose.yml      — db (Postgres) + app (FastAPI) services
 .github/workflows/
@@ -150,7 +151,7 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   on the first start and resets it while it stays there), backed by a signed session cookie
   (`SECRET_KEY`). There are no user accounts. The cookie carries `{"v": 2, "p": <HMAC of the session
   generation and the password hash under SECRET_KEY>, "s": <session id>}`, so changing the password
-  (Sign out ▾ → Change password, `POST /api/auth/change-password`, current password required;
+  (Settings → Account → Change password, `POST /api/auth/change-password`, current password required;
   `reset_password.py` from the host; or `FLOW_PASSWORD`) or the key signs every browser out; the tag is
   keyed so the readable cookie can't be used to guess the password. "Sign out everywhere" (top bar
   Sign out ▾, `POST /api/auth/logout-everywhere`) bumps the generation (`flow_settings`
@@ -344,7 +345,7 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   are put back only for display, by `card_analytics.unalias` (handles "Cards C and D" too).
   Every call is logged in `ai_request_log`: the data sent (`payload_json`), the whole request body
   (`request_json`: system prompt, tools, messages, settings) and the whole response (`response_json`),
-  shown in the AI dialog (top bar → AI, `static/ai.js`, `/api/ai/log`), beside the model each feature uses
+  shown in the AI section of Settings (top bar → ⚙ Settings → AI, `static/ai.js`, `/api/ai/log`), beside the model each feature uses
   (`card_ai.FEATURES`: add a new feature there). Any new AI call must record both (`card_ai.record_request` /
   `record_response`, as `card_ai._call` and `routers/ask.make_logger` do) and be covered by a test
   asserting nothing identifying is in it. Merchant
@@ -482,7 +483,7 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   again. One in-memory copy (`settings_store.load` at startup and after a backup restore), one worker.
   The AI dialog (`static/ai.js`, `routers/ai.py`) has the key (save, test, remove), the switch, the three
   models (datalist of known names, validated like `setup.sh` did) and the redact words.
-- **Update check** (`update_check.py`, `routers/updates.py`, the Sign out ▾ menu in `index.html`): a background
+- **Update check** (`update_check.py`, `routers/updates.py`, Settings → Updates in `index.html` / `static/settings.js`): a background
   task started by the lifespan (`update_check.loop`; two minutes after startup, so the deploy's health check
   comes first, then daily) does one GET to GitHub's latest-release endpoint for `update_check.REPO`, server-side
   (the browser never calls out; the CSP stays closed) and with nothing of the user's. The reply is external data:
@@ -493,8 +494,8 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   in memory between checks. `GET /api/version` returns `{version, update: status()}`; `POST /check` runs one now
   whatever the switch says (a failure is shown only there: the daily check logs and tries tomorrow); `POST
   /dismiss` hides a release until a newer one; `PUT /settings` is the daily switch (`flow_settings`
-  `update_check`, `SETTING_ENV` → `FLOW_UPDATE_CHECK`, refused with 409 while `.env` sets it). The menu shows a
-  dot on Sign out ▾ (fetched once after sign-in) and the version line with the release link, hide, and the switch.
+  `update_check`, `SETTING_ENV` → `FLOW_UPDATE_CHECK`, refused with 409 while `.env` sets it). The Settings button shows a
+  dot (fetched once after sign-in) and Settings → Updates the version line with the release link, hide, and the switch.
   Flow never installs an update: updating stays `git pull && ./deploy.sh`. README's "What leaves your machine"
   describes the call; keep it in step.
 
@@ -546,13 +547,13 @@ the proxy settings). For host state:
 | `COOKIE_SECURE` | `false` | When truthy (`1`/`true`/`yes`), marks the session cookie `Secure`; enable when serving over HTTPS behind a reverse proxy |
 | `FLOW_TRUSTED_PROXIES` | *(empty)* | Comma-separated IPs or CIDR ranges of reverse proxies whose `X-Forwarded-For` is believed for the login throttle (`auth.client_ip`); a malformed entry stops startup |
 | `FLOW_RECURRING_SUBSTREAMS` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to disable the recurring-transaction substream detection algorithm |
-| `ANTHROPIC_API_KEY` | *(unset: the key stored in Flow, or AI off)* | The Anthropic API key; normally entered under AI in the top bar and stored encrypted (`flow_secrets`). Set here it is copied in and wins while it stays |
+| `ANTHROPIC_API_KEY` | *(unset: the key stored in Flow, or AI off)* | The Anthropic API key; normally entered under Settings → AI and stored encrypted (`flow_secrets`). Set here it is copied in and wins while it stays |
 | `FLOW_AI_MODEL` | `claude-sonnet-5-5` | Claude model for every AI feature; normally set in the AI dialog (`flow_settings` `ai_model`); the default lives only in `card_ai.DEFAULT_MODEL` |
 | `FLOW_AI_MODEL_CATEGORIZE` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for merchant categorization only (`card_ai.model_name(TASK_CATEGORIZE)`; `ai_model_categorize`) |
 | `FLOW_AI_MODEL_ASK` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for the Assistant's topic gate and answer rounds (`TASK_ASK`; `ai_model_ask`) |
 | `FLOW_AI_ENABLED` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn AI calls off even with a key set (the AI dialog's switch, `ai_enabled`) |
 | `FLOW_AI_REDACT` | *(empty)* | Comma-separated extra words stripped from merchant names before any AI call (the AI dialog's field, `ai_redact`) |
-| `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Sign out ▾ has the same switch, `update_check`) |
+| `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Settings → Updates has the same switch, `update_check`) |
 
 `.env.example` lists the four user-facing variables (`POSTGRES_PASSWORD`, `FLOW_PASSWORD`,
 `SECRET_KEY` blank, so a copied file can't deploy as is; `APP_PORT`), plus the optional ones commented out.
@@ -620,7 +621,7 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
 
 - **Version**: `backend/VERSION`, one line, `MAJOR.MINOR.PATCH`, and the only place it is written
   (`version.py` reads it; `test_version.py` checks it). The image carries it (`COPY . .`). It is
-  shown under Sign out ▾ (`GET /api/version`, signed-in only: `/api/health` stays bare so an
+  shown under Settings → Updates (`GET /api/version`, signed-in only: `/api/health` stays bare so an
   unauthenticated caller can't tell which fixes a server has) and printed by `deploy.sh`.
 - **Every merge to `main` is a release; the bump is automatic.** Don't edit `backend/VERSION` in a
   change. The release picks the bump from the commits since the last release:

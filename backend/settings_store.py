@@ -5,7 +5,7 @@ Two kinds of value:
 
 * **Settings** (``flow_settings`` rows; they travel in backups): the AI models, whether AI
   calls are on, the extra words stripped from merchant names (changed in the AI dialog), and
-  whether the daily update check runs (Sign out ▾).
+  whether the daily update check runs (Settings → Updates).
 * **Secrets** (``flow_secrets`` rows; never in a backup): the dashboard password as a
   scrypt hash (nothing ever needs it back, only to check it) and the Anthropic API key,
   encrypted with AES-GCM under a key derived from SECRET_KEY. SECRET_KEY stays in .env

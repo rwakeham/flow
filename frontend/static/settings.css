@@ -1,6 +1,7 @@
 /* The Settings dialog (static/settings.js): a section list on the left, one section's content on the right.
    Tables and log styles come from cards.css; the AI section's own styles from ai.css. */
-#settings-modal .modal-box { width: 980px; max-width: 95vw; max-height: 90vh; overflow-y: auto; padding: 0; gap: 0; }
+#settings-modal .modal-box { width: 1120px; max-width: 95vw; max-height: 90vh; overflow-y: auto; padding: 0; gap: 0; }
+#backup-list-wrap { overflow-x: auto; }
 .settings-head { display: flex; align-items: center; gap: 8px; padding: 16px 24px; border-bottom: 1px solid var(--border); }
 .settings-layout { display: flex; min-height: 320px; }
 .settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-right: 1px solid var(--border); min-width: 180px; }

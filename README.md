@@ -4,7 +4,7 @@ A self-hosted personal finance dashboard. Track net worth over time, manage inve
 
 Flow is built for one person or one household running it on their own machine or home server, on a private network: one shared password, no user accounts, and your data in a PostgreSQL database you control. It is not designed to be exposed to the internet (see [Security](#security)). It reads any bank's or card issuer's CSV, TSV or XLSX export through import formats you set up once per layout, so no particular bank is assumed. Amounts are shown in US dollars, and the optional AI features use the Anthropic API with your own key.
 
-![Dashboard: net worth over time, asset allocation and debt-to-asset ratio](docs/screenshots/dashboard.png)
+![Dashboard: what needs attention, net worth over time, asset allocation and debt-to-asset ratio](docs/screenshots/dashboard.png)
 
 <sub>All screenshots show synthetic demo data.</sub>
 
@@ -125,6 +125,8 @@ Change the password under **Settings → Account** and the AI settings under **S
 - **If the login lock trips on its own.** Failed logins are counted per client address. On Docker Desktop (Mac and Windows), and for connections that reach the container through Docker's userland proxy (IPv6, `localhost`), every device on your network can arrive from the same internal address, so five wrong passwords from any one of them lock everyone out for five minutes. Set `FLOW_TRUSTED_PROXIES` to that address range (for example `172.16.0.0/12`) only if a reverse proxy in front of Flow sends `X-Forwarded-For`; otherwise the lock simply clears itself after five minutes, and keeping Flow on a network you trust is the fix.
 - **Other web apps on the same host name.** Flow refuses a change request that the browser says came from another origin, including another port on the same host, so a page from another app on the machine can't act with your cookie. Reads need the password either way.
 - **Backups hold everything.** A backup zip (**Settings → Backups**) contains all your data in plain JSON. Flow takes one every day (03:00 UTC by default) and before the first import of a day, keeping the newest 30 automatic ones; backups you take or upload stay until you delete them. Store downloads somewhere you'd keep bank statements, or download the encrypted copy: it is AES-GCM under a key derived from your passphrase, which Flow never stores, so a lost passphrase means an unreadable file.
+
+![Settings → Backups: the daily backup's schedule and retention, every backup on the server, and an encrypted download](docs/screenshots/settings-backups.png)
 - **Updates.** `git pull && ./deploy.sh` (below). Flow tells you under **Settings → Updates** when a newer release exists (the daily check above). Security fixes land on `main`; see [SECURITY.md](SECURITY.md) to report a problem.
 
 ## Scope and limits

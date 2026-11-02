@@ -349,12 +349,14 @@ def list_register_accounts(x_flow_today: str | None = Header(None), db: Session 
     if not accounts:
         return []
 
-    # One query: sum each account's manual transactions, honoring per-account cutoff.
+    # One query per account: the running balance (_compute_running_balance's rule: manual rows plus
+    # bank rows not matched to one), honoring per-account cutoff. The Dashboard's Net Worth card and
+    # the net worth chart (the timeseries above) and the Assistant then agree.
     sum_rows = db.execute(text("""
         SELECT t.register_account_id, COALESCE(SUM(t.amount), 0)
           FROM transactions t
           JOIN register_accounts a ON a.id = t.register_account_id
-         WHERE t.source = 'manual'
+         WHERE (t.source = 'manual' OR (t.source = 'bank' AND t.matched_to_id IS NULL))
            AND (
                 a.cutoff_date IS NULL
              OR a.cutoff_balance IS NULL

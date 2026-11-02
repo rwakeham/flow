@@ -250,7 +250,10 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   timeseries, `carried_accounts` in the summary); archived accounts don't carry. Manage Accounts shows each account's
   newest balance (`/api/accounts` `latest`) and flags one with nothing for the user's month (`behind`,
   `balance_sheet.behind`, by `X-Flow-Today`); a cash account is behind when its newest bank row (else any row) is
-  over `routers/register.REGISTER_BEHIND_DAYS` (40) old. The panel header counts them while collapsed. The AI fallback is opt-in per
+  over `routers/register.REGISTER_BEHIND_DAYS` (40) old. `/api/register/accounts` `current_balance` is the running
+  balance (manual rows plus unmatched bank rows, `_compute_running_balance`'s rule), the same figure as the
+  register's balance column, the net worth chart's cash series (`/accounts/timeseries`) and the Assistant's
+  `net_worth` lookup, so the Net Worth card agrees with all three. The panel header counts them while collapsed. The AI fallback is opt-in per
   paste: `balance_sheet.outline` replaces amounts and account numbers with tokens and every word outside `VOCAB`
   with `~`; the model returns token pairs (`items_from_ai`), local readings stand (`merge_items`). Logged as
   `ai_request_log` purpose `balances`. Text pasted into the Assistant that looks like a summary opens this dialog

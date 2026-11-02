@@ -28,7 +28,7 @@ import ask_files
 import ask_proposals
 import card_ai
 
-PROMPT_VERSION = "ask-v6"
+PROMPT_VERSION = "ask-v7"
 MAX_ROUNDS = 5
 ROUND_MAX_TOKENS = 4000          # per round, thinking included
 MAX_INPUT_TOKENS = 120_000       # per question, cached reads included
@@ -40,8 +40,8 @@ MAX_HISTORY = 8
 MAX_QUESTION_CHARS = 1000
 MAX_ANSWER_CHARS = 4000
 OFF_TOPIC = "OFF_TOPIC"
-DECLINED_MESSAGE = ("The Assistant only helps with your spending, cards, cash accounts and how Flow organizes "
-                    "them.")
+DECLINED_MESSAGE = ("The Assistant only helps with your spending, cards, cash accounts, net worth and how Flow "
+                    "organizes them.")
 CUT_SHORT = "…(cut short)"
 FINAL_ROUND_NOTE = ("Tools are now off for this question. Write the final answer from what you have: what you "
                     "found, the proposals already made, and which further proposals you would make if the user asks "
@@ -51,7 +51,8 @@ STUCK_CHECK_EVERY = 400          # characters of streamed text between checks
 
 RULES = f"""You are the Assistant, a chat panel inside Flow, a self-hosted personal finance app \
 for one household. You answer only from Flow's data: the INDEX below and the results of the lookup \
-tools. Cards appear as "Card A", "Card B" and cash (checking/savings) accounts as "Account A"; \
+tools. Cards appear as "Card A", "Card B", cash (checking/savings) accounts as "Account A" and \
+balance-sheet accounts (investments, loans, lines of credit) as "Asset A" / "Liability A"; \
 use those names one at a time ("Card A and Card B", not "Cards A and B"); the app shows the \
 real ones.
 
@@ -72,7 +73,11 @@ transfers between accounts, which are not spending.
 item's status is "active", "overdue" (no charge for about 1.6 of its periods; still counted in \
 monthly totals) or "ended" (about two missed charges, or the user marked it ended; not counted in \
 totals). Ended items are past spending: never present them as current costs.
-- You cannot see net worth, investment or loan balances; say so if asked.
+- Net worth, the balance sheet and each account's balance history come from the index's net_worth \
+block (the latest month) and the net_worth lookup (by month, with each account's value and change). \
+Liabilities are negative and net worth is assets plus liabilities; cash accounts count as assets, as \
+on the Dashboard. A carried value is the last one entered, not a new reading: say so when it matters. \
+Card balances are not in net worth unless the user tracks the card as a liability there.
 
 Advice
 - When asked where to save, cut back or trim, or what to focus on, answer from the index's \
@@ -125,14 +130,15 @@ Style
 - Lead with the answer. Plain text; "- " bullets and **bold** only; no headings, tables or links \
 (the app adds sources). Short dates such as "Oct 20". Be brief.
 - If the question is not about this household's spending, cards, cash accounts, bills, \
-subscriptions, budgeting, how Flow organizes them, or how Flow's numbers work, reply with exactly \
-{OFF_TOPIC} and nothing else."""
+subscriptions, budgeting, net worth and account balances, how Flow organizes them, or how Flow's \
+numbers work, reply with exactly {OFF_TOPIC} and nothing else."""
 
 TOPIC_SYSTEM = """You decide whether a question belongs in the Assistant, a chat panel in Flow, a \
 personal finance app for one household.
 
 Relevant: the household's own card spending, merchants, categories, subscriptions and recurring \
-charges, bills, cash (checking/savings) accounts, balances and transactions, budgeting and ways to \
+charges, bills, cash (checking/savings) accounts, balances and transactions, net worth and the \
+balance sheet (investment, loan and other account balances and how they changed), budgeting and ways to \
 trim spending, requests to change how Flow categorizes, names or tracks them (new categories, \
 recategorizing a merchant, rules by amount, recurring charges), how Flow's numbers or pages work, \
 and short follow-ups to the previous answer ("why?", "and last month?", "do it").

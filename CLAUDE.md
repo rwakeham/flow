@@ -506,12 +506,16 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   charges or was proposed with `propose_new_detail`, merchant exists, no overlapping amount rule) and
   return a card with the exact request for Flow's normal endpoint; the browser sends it when
   the user presses Apply, and that endpoint validates again. Code owns the facts: Claude gets an index (coverage,
-  category totals by month, category-list counts, the top of the trim list, the page on screen) and
-  seven strict lookups (including `categories`: the list with built-in/yours flags, original names of
-  renamed built-ins and charge counts; `spending_breakdown` groups by detail too) that
-  return summaries; only `find_card_transactions` / `find_cash_transactions` return single rows (25 at
-  most). Cards are "Card A", cash accounts "Account A" (`realias` converts real names in returned
-  history; `unalias` restores them in the answer); names pass `is_safe_label`, transfers to people keep
+  category totals by month, category-list counts, the top of the trim list, the latest month's net worth
+  (`net_worth_index`), the page on screen) and nine strict lookups (including `categories`: the list with
+  built-in/yours flags, original names of renamed built-ins and charge counts; `spending_breakdown` groups by
+  detail too; `net_worth`: the balance sheet by month as the Dashboard chart draws it, `net_worth_series` lining
+  the balance periods up with the cash register's month-end balances from the rows already loaded and counting
+  cash as assets, ignored accounts listed but left out, with each account's value and change, or one account's
+  history) that return summaries; only `find_card_transactions` / `find_cash_transactions` return single rows
+  (25 at most). Cards are "Card A", cash accounts "Account A", balance-sheet accounts "Asset A" / "Liability A"
+  (`load_balances` over `routers/data.balance_matrix`; institutions are never loaded; `realias` converts real
+  names in returned history; `unalias` restores them in the answer); names pass `is_safe_label`, transfers to people keep
   only the service ("Zelle transfer"). Advice comes from `ask_data.trim_items`, which code ranks (easy
   first, then monthly cost). One question: a low-effort topic gate (`{"relevant": bool}`; a failure
   counts as relevant and the `OFF_TOPIC` reply is the backstop), then up to 5 streamed rounds (4

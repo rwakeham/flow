@@ -103,6 +103,10 @@ function askPage() {
     if (v) page.card_id = parseInt(v, 10);
   }
   if (section === 'cashflow' && cfCurrentId) page.account_id = cfCurrentId;
+  if (section === 'dashboard') {
+    const active = document.querySelector('#' + SECTIONS.dashboard + ' .tab-panel.active');
+    if (active) page.tab = active.id.replace(/^tab-/, '');
+  }
   return page;
 }
 
@@ -125,6 +129,8 @@ function askSuggestions() {
     if (p.tab === 'review') return ['Which of my uncategorized merchants can you sort out?', 'Where can I easily trim spending?'];
     return [...(byTab[p.tab] || ['Where is most of my money going?']), 'Where can I easily trim spending?'];
   }
+  if (p.section === 'dashboard' && p.tab !== 'cashflow') return ['How did my net worth change this year?',
+    'Which account grew the most this year?', 'Where can I easily trim spending?'];
   return ['Where can I easily trim spending?', 'How much did I spend on my cards last month?', 'What subscriptions am I paying for?'];
 }
 
@@ -290,9 +296,9 @@ function askRenderLog() {
   log.replaceChildren();
   if (!ASK.items.length) {
     log.append(askEl('div', {class: 'ask-empty'},
-      'Ask about your card spending and cash accounts, or ask it to organize things ("Maple Street Studio is my ' +
+      'Ask about your card spending, cash accounts and net worth, or ask it to organize things ("Maple Street Studio is my ' +
       'pottery class, not shopping"); changes come back as proposals you apply. Answers come only from Flow\'s data; Claude sees summaries ' +
-      'with cards shown as "Card A", and every request is in the AI privacy log (Settings → AI in the top bar).'));
+      'with cards shown as "Card A" and balance-sheet accounts as "Asset A", and every request is in the AI privacy log (Settings → AI in the top bar).'));
     const sug = askEl('div', {class: 'ask-suggest'}, askEl('div', {class: 'lbl'}, 'Try'));
     askSuggestions().forEach(q => sug.append(askEl('button', {onclick: () => askSend(q)}, q)));
     log.append(sug);

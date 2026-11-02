@@ -3,8 +3,9 @@ What Ask may tell Claude: the index, the trim list and the lookup tools.
 
 Everything here runs locally over all card and cash-register transactions and
 returns summaries. Privacy rules for anything that leaves the server:
-  * cards are "Card A", "Card B" and cash accounts "Account A" (aliases are
-    turned back into real names in the answer the user sees);
+  * cards are "Card A", "Card B", cash accounts "Account A" and balance-sheet
+    accounts "Asset A" / "Liability A" (aliases are turned back into real names
+    in the answer the user sees; institutions are never loaded);
   * merchant and payee names are cleaned (card_privacy.sanitize for register
     descriptions) and must pass card_privacy.is_safe_label, else "(withheld)";
   * person-to-person transfers keep only the service ("Zelle transfer"): the
@@ -77,6 +78,17 @@ class CashAccount:
 
 
 @dataclass
+class BalanceAccount:
+    """A balance-sheet account (investment, loan, line of credit ...), aliased "Asset A" / "Liability A"."""
+    id: int
+    name: str
+    alias: str
+    account_type: str      # 'asset' | 'liability'
+    ignored: bool = False
+    archived: bool = False
+
+
+@dataclass
 class CashTxn:
     account_id: int
     date: date
@@ -107,6 +119,9 @@ class AskData:
     amount_rules: list = field(default_factory=list)  # card_amount_rules.AmountRule, for proposal checks
     cash_rows: list = field(default_factory=list)     # cash_flow.CashRow, for the cash flow lookup (never sent)
     payee_roles: dict = field(default_factory=dict)   # payee key -> cash_flow.Role
+    balance_accounts: list[BalanceAccount] = field(default_factory=list)
+    balance_periods: list[date] = field(default_factory=list)          # every period with a balance, oldest first
+    balance_matrix: dict[int, tuple[list, list]] = field(default_factory=dict)  # account id -> (values, carried)
 
     def card_by_alias(self, alias: str) -> Card | None:
         return next((c for c in self.cards if c.alias.lower() == alias.strip().lower()), None)
@@ -114,9 +129,13 @@ class AskData:
     def account_by_alias(self, alias: str) -> CashAccount | None:
         return next((a for a in self.cash if a.alias.lower() == alias.strip().lower()), None)
 
+    def balance_by_alias(self, alias: str) -> BalanceAccount | None:
+        return next((a for a in self.balance_accounts if a.alias.lower() == alias.strip().lower()), None)
+
     def alias_map(self) -> dict[str, str]:
         out = {c.alias: c.name for c in self.cards}
         out.update({a.alias: a.name for a in self.cash})
+        out.update({a.alias: a.name for a in self.balance_accounts})
         return out
 
     def safe(self, name: str) -> str:
@@ -132,7 +151,7 @@ def alias(prefix: str, i: int) -> str:
 
 
 def unalias(text: str, mapping: dict[str, str]) -> str:
-    """Replace "Card A" / "Account A" (and "Cards A and B") with the real names."""
+    """Replace "Card A" / "Account A" / "Asset A" / "Liability A" (and "Cards A and B") with the real names."""
     return card_analytics.unalias(text, mapping)
 
 
@@ -182,7 +201,23 @@ def load(db) -> AskData:
                                           p.frequency))
     data.payee_roles = {r.key: cash_flow.Role(r.role, r.category or "", r.target or "")
                         for r in db.query(PayeeRole).all()}
+    load_balances(db, data)
     return data
+
+
+def load_balances(db, data: AskData) -> None:
+    """The balance sheet as the Dashboard draws it (routers/data.balance_matrix), aliased by type."""
+    from routers.data import balance_matrix
+
+    periods, accounts, matrix = balance_matrix(db)
+    data.balance_periods = list(periods)
+    data.balance_matrix = matrix
+    counts = {"asset": 0, "liability": 0}
+    for a in sorted(accounts, key=lambda x: x.id):
+        kind = "asset" if a.account_type == "asset" else "liability"
+        data.balance_accounts.append(BalanceAccount(a.id, a.name, alias(kind.capitalize(), counts[kind]), kind,
+                                                    bool(a.ignored), bool(a.archived)))
+        counts[kind] += 1
 
 
 # ── Rounding and size ────────────────────────────────────────────────────────
@@ -472,7 +507,8 @@ def page_context(data: AskData, page: dict | None) -> dict:
         acct = next((a for a in data.cash if a.id == page.get("account_id")), None)
         out["account"] = acct.alias if acct else None
     elif section == "dashboard":
-        out["note"] = "Net worth and investment balances are not available to Ask."
+        tab = page.get("tab")
+        out["tab"] = tab if tab in ("overview", "assets", "liabilities", "cashflow") else "overview"
     return out
 
 
@@ -495,6 +531,7 @@ def build_index(data: AskData, page: dict | None) -> dict:
         "cards": [{"card": c.alias, "data_from": c.start, "data_to": c.end,
                    "transactions": sum(1 for r in data.rows if r.card_account_id == c.id)} for c in data.cards],
         "cash_accounts": [{"account": a.alias, **balances.get(a.id, {})} for a in data.cash],
+        "net_worth": net_worth_index(data),
         "card_spending_by_category": {
             "period": f"{lo.isoformat()} to {hi.isoformat()}", "total": total6,
             "rows": [{"category": k, "total": v, "monthly_avg": v / months,
@@ -519,6 +556,94 @@ def cash_balances(data: AskData) -> dict[int, dict]:
         out[a.id] = {"balance_today": now, "scheduled_after_today": later,
                      "data_from": min(real) if real else None, "data_to": max(real) if real else None}
     return out
+
+
+# ── Net worth ────────────────────────────────────────────────────────────────
+# The Dashboard's net worth chart (index.html deriveSeries) lines the balance sheet up with the cash
+# register by calendar month and counts cash accounts as assets; the same arithmetic runs here, over the
+# data already loaded, so the Assistant's figures are the chart's.
+
+NET_WORTH_MAX_MONTHS = 24
+
+
+def _ym(d: date) -> str:
+    return d.isoformat()[:7]
+
+
+def cash_month_ends(data: AskData) -> dict[int, dict[str, float]]:
+    """Each cash account's balance at the end of every month it has rows in (routers/register's timeseries rule)."""
+    out: dict[int, dict[str, float]] = {}
+    for a in data.cash:
+        txns = [t for t in data.cash_txns if t.account_id == a.id]
+        running = sum(t.amount for t in txns if t.label == "Opening balance")
+        by_month: dict[str, float] = {}
+        for t in sorted((t for t in txns if t.label != "Opening balance"), key=lambda t: t.date):
+            running += t.amount
+            by_month[_ym(t.date)] = running        # the month's last row leaves its month-end balance
+        out[a.id] = by_month
+    return out
+
+
+def net_worth_series(data: AskData) -> tuple[list[str], dict[str, list], dict[str, list]]:
+    """
+    (months, values by alias, carried flags by alias): one entry per calendar month from the balance
+    sheet's first month to today's, each account's value carried into months it has no entry for.
+    Balance-sheet accounts come from the matrix; cash accounts from their month-end balances.
+    """
+    bal_months: dict[str, int] = {}
+    for i, p in enumerate(data.balance_periods):
+        bal_months[_ym(p)] = i                      # the newest period in a month wins, as on the chart
+    cash = cash_month_ends(data)
+    first = min(bal_months) if bal_months else min((m for mm in cash.values() for m in mm), default=None)
+    if first is None:
+        return [], {}, {}
+    months = sorted(m for m in {*bal_months, *(m for mm in cash.values() for m in mm)} if first <= m <= _ym(data.today))
+    values: dict[str, list] = {}
+    carried: dict[str, list] = {}
+    for a in data.balance_accounts:
+        vals, flags = data.balance_matrix.get(a.id) or ([None] * len(data.balance_periods), [False] * len(data.balance_periods))
+        last, last_carried, out, outc = None, False, [], []
+        for m in months:
+            if m in bal_months:
+                last, last_carried = vals[bal_months[m]], flags[bal_months[m]]
+                outc.append(last_carried)
+            else:
+                outc.append(last is not None)       # a month with no balance at all: every value is carried
+            out.append(last)
+        values[a.alias], carried[a.alias] = out, outc
+    for a in data.cash:
+        last, out = None, []
+        for m in months:
+            last = cash[a.id].get(m, last)
+            out.append(last)
+        values[a.alias], carried[a.alias] = out, [False] * len(months)
+    return months, values, carried
+
+
+def net_worth_totals(data: AskData, months: list[str], values: dict[str, list], carried: dict[str, list]) -> list[dict]:
+    """Per month: assets (balance-sheet assets plus cash), liabilities (negative), net worth, carried count."""
+    live = [a for a in data.balance_accounts if not a.ignored]
+    rows = []
+    for i, m in enumerate(months):
+        assets = sum(values[a.alias][i] or 0.0 for a in live if a.account_type == "asset")
+        assets += sum(values[a.alias][i] or 0.0 for a in data.cash)
+        liabs = sum(values[a.alias][i] or 0.0 for a in live if a.account_type != "asset")
+        rows.append({"month": m, "net_worth": assets + liabs, "assets": assets, "liabilities": liabs,
+                     "carried_accounts": sum(1 for a in live if carried[a.alias][i] and values[a.alias][i] is not None)})
+    return rows
+
+
+def net_worth_index(data: AskData) -> dict:
+    """The index's net worth block: the latest month's totals and the change since the month before."""
+    months, values, carried = net_worth_series(data)
+    block = {"balance_accounts": len(data.balance_accounts), "cash_accounts_included": len(data.cash), "lookup": "net_worth"}
+    if not months:
+        return block
+    rows = net_worth_totals(data, months, values, carried)
+    cur, prev = rows[-1], rows[-2] if len(rows) > 1 else None
+    return {"as_of": cur["month"], "net_worth": cur["net_worth"], "assets": cur["assets"], "liabilities": cur["liabilities"],
+            "change_last_month": None if prev is None else cur["net_worth"] - prev["net_worth"],
+            "data_from": months[0], "data_to": months[-1], **block}
 
 
 # ── Lookups ──────────────────────────────────────────────────────────────────
@@ -576,6 +701,14 @@ TOOLS = [
      "description": "Individual cash-register transactions matching part of a payee name, newest first, at most 25, "
                     "with the match count and total. Use only for questions about specific transactions.",
      "input_schema": _schema({"account": S, "payee": S, "start": S, "end": S, "limit": I})},
+    {"name": "net_worth", "strict": True,
+     "description": "The household's net worth as the Dashboard shows it: balance-sheet assets and liabilities "
+                    "(investments, loans, lines of credit: 'Asset A', 'Liability A') plus cash accounts counted as "
+                    "assets, by month for the last N months (0 = all history; for 'this year' pass the months since "
+                    "January). Gives the totals, the change over the window, and each account's value and change. "
+                    "account is an alias like 'Asset A', 'Liability B' or 'Account A' for that account's own history, "
+                    "or empty for all.",
+     "input_schema": _schema({"months": I, "account": S})},
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
@@ -601,6 +734,8 @@ def describe(name: str, args: dict, data: AskData) -> str:
         return f"Reading {real.get(a.get('account') or '', 'cash account')} cash flow"
     if name == "find_cash_transactions":
         return f"Finding {a.get('payee') or 'cash'} transactions"
+    if name == "net_worth":
+        return f"Reading {real.get(a.get('account') or '', 'the balance sheet')}"
     return "Looking something up"
 
 
@@ -611,7 +746,7 @@ def run(name: str, args: dict, data: AskData) -> tuple[str, list[dict]]:
     fn = {"trim_details": _trim_details, "spending_breakdown": _breakdown, "subscriptions": _subscriptions,
           "categories": _categories, "cash_flow": _cash_flow,
           "find_card_transactions": _find_card, "cash_summary": _cash_summary,
-          "find_cash_transactions": _find_cash}[name]
+          "find_cash_transactions": _find_cash, "net_worth": _net_worth}[name]
     try:
         result, sources = fn(data, args)
     except (KeyError, TypeError, ValueError) as exc:
@@ -872,3 +1007,70 @@ def _find_cash(data: AskData, a: dict):
                                for t in shown]}
     return result, [{"label": f"Cash Flow: {x.name}", "nav": {"section": "cashflow", "account": x.id}}
                     for x in data.cash if x.id in accts][:3]
+
+
+NET_WORTH_NOTE = ("Liabilities are negative; net worth = assets + liabilities. Cash accounts count as assets, as on "
+                  "the Dashboard. Ignored accounts are listed but left out of the totals. A carried value is the last "
+                  "one entered, not a new reading.")
+
+
+def _net_worth(data: AskData, a: dict):
+    months, values, carried = net_worth_series(data)
+    if not months:
+        raise LookupError_("There is no balance sheet yet: no account balances have been entered in Flow.")
+    n = int(a.get("months", 0) or 0)
+    start = max(0, len(months) - min(n, NET_WORTH_MAX_MONTHS)) if n > 0 else 0
+    last = len(months) - 1
+    idx = range(start, last + 1)
+
+    def change(seq: list) -> float | None:
+        return None if seq[start] is None or seq[last] is None else seq[last] - seq[start]
+
+    def span(seq: list) -> tuple[str | None, str | None]:
+        have = [months[i] for i, v in enumerate(seq) if v is not None]
+        return (have[0], have[-1]) if have else (None, None)
+
+    result: dict = {"as_of": months[last], "window": {"from": months[start], "to": months[last], "months": last - start + 1},
+                    "cash_included": True}
+    account = (a.get("account") or "").strip()
+    if account:
+        acct = data.balance_by_alias(account) or data.account_by_alias(account)
+        if acct is None:
+            known = [x.alias for x in data.balance_accounts] + [x.alias for x in data.cash]
+            raise LookupError_(f"No account called {account!r}. Accounts: {', '.join(known)}")
+        seq, kind = values[acct.alias], getattr(acct, "account_type", "cash")
+        data_from, data_to = span(seq)
+        result.update({
+            "account": acct.alias, "type": kind, "value": seq[last], "change": change(seq),
+            "ignored": bool(getattr(acct, "ignored", False)), "data_from": data_from, "data_to": data_to,
+            "by_month": [{"month": months[i], "value": seq[i], "carried": carried[acct.alias][i]} for i in idx],
+            "note": NET_WORTH_NOTE})
+        if kind == "cash":
+            nav = {"section": "cashflow", "account": acct.id}
+        else:
+            nav = {"section": "dashboard", "tab": "assets" if kind == "asset" else "liabilities"}
+        return result, [{"label": f"Dashboard: {acct.name}", "nav": nav}]
+
+    rows = net_worth_totals(data, months, values, carried)
+    first_nw, last_nw = rows[start]["net_worth"], rows[last]["net_worth"]
+    result.update({
+        "net_worth": last_nw, "assets": rows[last]["assets"], "liabilities": rows[last]["liabilities"],
+        "change": {"net_worth": last_nw - first_nw,
+                   "net_worth_pct": ((last_nw - first_nw) / abs(first_nw) * 100) if first_nw else None,
+                   "assets": rows[last]["assets"] - rows[start]["assets"],
+                   "liabilities": rows[last]["liabilities"] - rows[start]["liabilities"]},
+        "by_month": rows[start:],
+        "accounts": [],
+        "note": NET_WORTH_NOTE})
+    for acct in data.balance_accounts:
+        seq = values[acct.alias]
+        data_from, data_to = span(seq)
+        result["accounts"].append({"account": acct.alias, "type": acct.account_type, "value": seq[last], "change": change(seq),
+                                   "carried": carried[acct.alias][last] and seq[last] is not None, "ignored": acct.ignored,
+                                   "data_from": data_from, "data_to": data_to})
+    for acct in data.cash:
+        seq = values[acct.alias]
+        data_from, data_to = span(seq)
+        result["accounts"].append({"account": acct.alias, "type": "cash", "value": seq[last], "change": change(seq),
+                                   "carried": False, "ignored": False, "data_from": data_from, "data_to": data_to})
+    return result, [{"label": "Dashboard: Net worth", "nav": {"section": "dashboard", "tab": "overview"}}]

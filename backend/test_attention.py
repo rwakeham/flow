@@ -80,3 +80,34 @@ def test_names_are_returned_verbatim_for_the_page_to_escape():
     items = attention.build({"today": TODAY, "last_backup_at": "2026-11-02T03:00:00+00:00",
                              "cash_accounts": [{"id": 1, "name": "<b>Checking</b>", "unmatched": 2, "pending": 0, "behind": False}]})
     assert items[0]["text"] == "2 bank rows to reconcile in <b>Checking</b>"
+
+
+# ── Snoozing ──────────────────────────────────────────────────────────────────
+
+def test_every_item_has_a_stable_unique_key():
+    items = attention.build(full_input())
+    keys = [i["key"] for i in items]
+    assert len(keys) == len(set(keys))
+    assert "unmatched:7" in keys and "cash_behind:8" in keys and "update:9.9.9" in keys and "review" in keys
+    assert all(attention.KEY_RE.match(k) for k in keys)
+
+
+def test_a_snooze_hides_an_item_until_its_date_or_until_its_count_grows():
+    items = attention.build(full_input())
+    snoozes = {"review": {"until": "2026-11-09", "count": 5}, "payees": {"until": None, "count": 2},
+               "unmatched:7": {"until": "2026-11-02", "count": 3}}             # this one has expired
+    shown, hidden = attention.split_snoozed(items, snoozes, TODAY)
+    assert [h["kind"] for h in hidden] == ["payees", "review"]
+    assert hidden[1]["snoozed_until"] == "2026-11-09" and hidden[0]["snoozed_until"] is None
+    assert any(i["key"] == "unmatched:7" for i in shown)
+    grown = attention.build(full_input(review_open=6, unsorted_payees=3))
+    shown, hidden = attention.split_snoozed(grown, snoozes, TODAY)
+    assert hidden == []                                                     # something new: both are back
+    assert attention.prune_snoozes(snoozes, TODAY) == {"review": snoozes["review"], "payees": snoozes["payees"]}
+
+
+def test_stored_snoozes_are_read_as_outside_data():
+    raw = {"review": {"until": "2026-11-09", "count": 5}, "payees": {"until": None, "count": "x"},
+           "<b>": {"until": None, "count": 1}, "update:9.9.9": {"until": "not a date", "count": 1}, "subs_dup": "nope"}
+    assert attention.clean_snoozes(raw) == {"review": {"until": "2026-11-09", "count": 5}, "payees": {"until": None, "count": 0}}
+    assert attention.clean_snoozes("junk") == {}

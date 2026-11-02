@@ -6,7 +6,8 @@ understands). Nothing here is stored: every signal is recomputed from what the r
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 
 BACKUP_OLD_DAYS = 7          # "No backup in N days" from here on
 
@@ -43,8 +44,8 @@ def build(inp) -> list[dict]:
     today: date = g("today") or date.today()
     items: list[dict] = []
 
-    def add(kind, count, text, nav):
-        items.append({"kind": kind, "count": int(count), "text": text, "nav": nav})
+    def add(kind, count, text, nav, key=None):
+        items.append({"kind": kind, "key": key or kind, "count": int(count), "text": text, "nav": nav})
 
     problem = g("ai_problem")
     if problem:
@@ -55,11 +56,11 @@ def build(inp) -> list[dict]:
     for a in cash:
         if a.get("unmatched"):
             add("unmatched", a["unmatched"], f"{_n(a['unmatched'], 'bank row', 'bank rows')} to reconcile in {a['name']}",
-                {"section": "cashflow", "account": a["id"], "reconcile": True})
+                {"section": "cashflow", "account": a["id"], "reconcile": True}, key=f"unmatched:{a['id']}")
     for a in cash:
         if a.get("pending"):
             add("pending", a["pending"], f"{_n(a['pending'], 'match', 'matches')} to confirm in {a['name']}",
-                {"section": "cashflow", "account": a["id"], "reconcile": True})
+                {"section": "cashflow", "account": a["id"], "reconcile": True}, key=f"pending:{a['id']}")
 
     behind = [a for a in (g("balance_accounts") or []) if a.get("behind") and not a.get("ignored") and not a.get("archived")]
     if behind:
@@ -69,7 +70,7 @@ def build(inp) -> list[dict]:
     for a in cash:
         if a.get("behind"):
             add("cash_behind", 1, f"Nothing newer than 40 days in {a['name']}: import its latest statement",
-                {"section": "cashflow", "account": a["id"]})
+                {"section": "cashflow", "account": a["id"]}, key=f"cash_behind:{a['id']}")
 
     n = g("unsorted_payees") or 0
     if n:
@@ -103,5 +104,62 @@ def build(inp) -> list[dict]:
 
     upd = g("update")
     if upd and upd.get("version"):
-        add("update", 1, f"Flow {upd['version']} is available", {"action": "settings", "section": "updates"})
+        add("update", 1, f"Flow {upd['version']} is available", {"action": "settings", "section": "updates"},
+            key=f"update:{upd['version']}")
     return items
+
+
+# ── Snoozing ─────────────────────────────────────────────────────────────────
+# The user can put an item off ("remind me tomorrow / in a week / next month") or ignore it until it
+# changes. A snooze is kept per item key with the count the item had then: it hides the item while
+# its date hasn't passed (no date = ignore) AND the count hasn't grown, so something new on a
+# snoozed item brings it back on its own. Stored as one JSON map in flow_settings (SNOOZE_KEY).
+
+SNOOZE_KEY = "attention_snoozes"
+SNOOZE_DAYS = {"day": 1, "week": 7, "month": 30}
+KEY_RE = re.compile(r"^[a-z_]+(:[A-Za-z0-9.]{1,40})?$")
+
+
+def clean_snoozes(raw) -> dict[str, dict]:
+    """The stored map as code uses it: {key: {"until": "YYYY-MM-DD" | None, "count": int}}, anything
+    else dropped (the row travels in backups, so it is read as outside data)."""
+    out: dict[str, dict] = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, v in raw.items():
+        if not isinstance(key, str) or not KEY_RE.match(key) or not isinstance(v, dict):
+            continue
+        until = v.get("until")
+        if until is not None:
+            try:
+                until = date.fromisoformat(str(until)).isoformat()
+            except ValueError:
+                continue
+        count = v.get("count")
+        out[key] = {"until": until, "count": int(count) if isinstance(count, int) and not isinstance(count, bool) else 0}
+    return out
+
+
+def snoozed(item: dict, snoozes: dict[str, dict], today: date) -> bool:
+    s = snoozes.get(item.get("key") or "")
+    if not s:
+        return False
+    if s["until"] is not None and s["until"] <= today.isoformat():
+        return False
+    return int(item.get("count") or 0) <= s["count"]
+
+
+def split_snoozed(items: list[dict], snoozes: dict[str, dict], today: date) -> tuple[list[dict], list[dict]]:
+    """(the items to show, the items hidden by a snooze), the hidden ones carrying ``snoozed_until``."""
+    shown, hidden = [], []
+    for it in items:
+        if snoozed(it, snoozes, today):
+            hidden.append({**it, "snoozed_until": snoozes[it["key"]]["until"]})
+        else:
+            shown.append(it)
+    return shown, hidden
+
+
+def prune_snoozes(snoozes: dict[str, dict], today: date) -> dict[str, dict]:
+    """Drop the snoozes whose date has passed; ignores (no date) stay until the item is unhidden."""
+    return {k: v for k, v in snoozes.items() if v["until"] is None or v["until"] > today.isoformat()}

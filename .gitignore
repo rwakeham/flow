@@ -1,0 +1,9 @@
+__pycache__/
+
+# Local secrets and machine-specific config. These MUST stay ignored: .env is
+# host state, not reproducible from the repo. If it were ever committed, every
+# credential inside would need rotating; a revert is not enough.
+# .env.example is tracked and stays visible.
+.env
+.env.*
+!.env.example

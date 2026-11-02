@@ -1,0 +1,22 @@
+{
+ "ledger_rows": [
+  {
+   "amount": 2478.3,
+   "date": "2026-10-01",
+   "description": "Paycheck",
+   "is_reconciled": true
+  },
+  {
+   "amount": -1500.0,
+   "date": "2026-10-02",
+   "description": "Mortgage",
+   "is_reconciled": true
+  },
+  {
+   "amount": -120.55,
+   "date": "2026-10-03",
+   "description": "Groceries",
+   "is_reconciled": false
+  }
+ ]
+}

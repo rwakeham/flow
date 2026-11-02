@@ -1,0 +1,3217 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💸</text></svg>">
+<script src="/static/vendor/chart.umd.js"></script>  <!-- Chart.js 4.4.1 (MIT), from the npm package -->
+<style>
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --surface2: #f7f8fa;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #378ADD;
+  --green: #22c55e;
+  --red: #ef4444;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: #1c1f26;
+  --surface2: #252830;
+  --text: #e8eaf0;
+  --text-muted: #9ca3af;
+  --border: #2e3240;
+  --accent: #5a9de0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+/* ── Login ── */
+#login-overlay {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+#login-overlay.hidden { display: none; }
+.login-box {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 40px; width: 340px; display: flex; flex-direction: column; gap: 16px;
+}
+.login-box h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+.login-box p { color: var(--text-muted); font-size: 13px; }
+.login-box input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 14px;
+}
+.login-box input:focus { outline: 2px solid var(--accent); }
+#login-error { color: var(--red); font-size: 13px; display: none; }
+
+/* ── Buttons ── */
+button {
+  cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); font-size: 13px; padding: 7px 14px;
+  transition: background 0.15s;
+}
+button:hover { background: var(--surface2); }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { opacity: 0.9; background: var(--accent); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.clear-filters { white-space: nowrap; color: var(--text-muted); }
+.clear-filters[hidden] { display: none; }
+
+/* ── Top bar ── */
+.signout-wrap { position: relative; }
+.signout-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 600; min-width: 220px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15); padding: 4px; display: flex; flex-direction: column; }
+.signout-menu.hidden { display: none; }
+.signout-menu button { text-align: left; border: none; background: none; padding: 8px 10px; width: 100%;
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--text); }
+.signout-menu button:hover { background: var(--surface2); }
+.signout-menu .sub { display: block; font-size: 11px; color: var(--text-muted); }
+.signout-menu .app-version { font-size: 11px; color: var(--text-muted); padding: 6px 10px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+.signout-menu .app-version:empty { display: none; }
+#topbar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 24px; height: 52px; gap: 12px;
+}
+#topbar h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
+#topbar .logo-link { display: flex; align-items: center; margin-right: auto; flex: 0 0 auto; border-radius: 6px; }
+#topbar .logo { height: 36px; width: auto; display: block; }
+#topbar .spacer { flex: 1; }
+
+/* ── Layout ── */
+#app { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+#app.hidden { display: none; }
+
+/* ── Metric cards ── */
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.card {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 4px;
+}
+.card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.card-value { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+.card-delta { font-size: 12px; font-weight: 500; }
+.delta-up { color: var(--green); }
+.delta-down { color: var(--red); }
+.delta-neutral { color: var(--text-muted); }
+
+/* ── Tabs ── */
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.tab-btn {
+  padding: 8px 16px; font-size: 13px; border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; background: transparent; color: var(--text-muted);
+}
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-btn:hover { background: transparent; color: var(--text); }
+
+/* ── Chart panels ── */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.chart-card {
+  background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius);
+  padding: 16px;
+}
+.chart-card.full { grid-column: 1 / -1; }
+.chart-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.chart-wrap { position: relative; width: 100%; min-width: 0; }
+.chart-wrap canvas { max-width: 100%; }
+.stat-big { font-size: 28px; font-weight: 700; letter-spacing: -1px; margin-bottom: 4px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Toggle ── */
+.toggle-group { display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.toggle-btn { border: none; border-radius: 0; padding: 4px 10px; font-size: 11px; color: var(--text-muted); }
+.toggle-btn.active { background: var(--surface2); color: var(--text); font-weight: 600; }
+
+/* ── Modals ── */
+#unified-import-modal, #add-txn-modal, #add-to-ledger-modal, #manage-acct-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; z-index: 500;
+}
+#unified-import-modal.hidden, #add-txn-modal.hidden,
+#add-to-ledger-modal.hidden, #manage-acct-modal.hidden { display: none; }
+#uimp-status { font-size: 13px; padding: 10px; background: var(--surface2); border-radius: var(--radius-sm); display: none; }
+#uimp-acct-row { display: none; }
+#uimp-batch { display: none; font-size: 12px; }
+.uimp-batch-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-top: 6px; }
+.uimp-batch-row .head { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.uimp-batch-row .name { font-weight: 600; word-break: break-all; }
+.uimp-batch-row select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 12px; max-width: 100%; }
+.uimp-batch-row .why { margin-top: 4px; color: var(--text-muted); }
+.uimp-batch-row .why.sure { color: var(--green); }
+.uimp-batch-row .why.unsure, .uimp-batch-row .warn { color: #b45309; }
+.uimp-batch-row .warn { margin-top: 4px; }
+.uimp-batch-row .result { margin-top: 4px; }
+.uimp-batch-row.needs { border-color: #b45309; }
+#uimp-acct-row label { font-size: 12px; color: var(--text-muted); }
+#uimp-acct-row select { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 13px; margin-top: 4px; }
+.modal-box {
+  background: var(--surface); border-radius: var(--radius); padding: 28px;
+  width: 420px; display: flex; flex-direction: column; gap: 14px;
+}
+.modal-box h2 { font-size: 16px; font-weight: 700; }
+.modal-box p { font-size: 12px; color: var(--text-muted); }
+.modal-box input[type=file] { font-size: 13px; color: var(--text); }
+#upload-result { font-size: 13px; padding: 10px; background: var(--surface2); border-radius: var(--radius-sm); display: none; }
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── Account manager ── */
+#acct-panel { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); margin-top: 16px; }
+#acct-toggle { width: 100%; text-align: left; padding: 12px 16px; font-weight: 600; font-size: 13px; border: none; border-radius: var(--radius); background: transparent; }
+#acct-body { display: none; padding: 0 16px 16px; }
+#acct-body.open { display: block; }
+.acct-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.acct-row:last-child { border-bottom: none; }
+.acct-name { flex: 1; }
+.badge { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 600; letter-spacing: 0.04em; }
+.badge-asset { background: #dcfce7; color: #15803d; }
+.badge-liability { background: #fee2e2; color: #b91c1c; }
+.badge-register { background: #dbeafe; color: #1d4ed8; }
+[data-theme="dark"] .badge-asset { background: #14532d; color: #86efac; }
+[data-theme="dark"] .badge-liability { background: #7f1d1d; color: #fca5a5; }
+[data-theme="dark"] .badge-register { background: #1e3a5f; color: #93c5fd; }
+.acct-row select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 12px; }
+.acct-row.ignored { opacity: 0.45; }
+.ignore-btn { padding: 3px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.ignore-btn.active { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+[data-theme="dark"] .ignore-btn.active { background: #451a03; color: #fcd34d; border-color: #92400e; }
+
+/* ── Empty state ── */
+.empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+.empty h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+
+/* ── Section nav ── */
+.section-nav { display: flex; gap: 2px; margin-right: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.section-btn { border: none; border-radius: 0; padding: 5px 13px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: transparent; }
+.section-btn.active { background: var(--accent); color: #fff; }
+.section-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+/* ── Cash Flow app ── */
+#cashflow-app { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+#cashflow-app.hidden { display: none; }
+.cf-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.cf-toolbar select { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; min-width: 180px; }
+
+/* ── Register table ── */
+.register-wrap { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.register-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.register-table th { padding: 9px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--surface2); }
+.register-table th.num, .register-table td.num { text-align: right; }
+.register-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.register-table tr:last-child td { border-bottom: none; }
+.register-table tr.row-manual:hover { background: var(--surface2); }
+.register-table tr.row-bank-unmatched { background: rgba(245,158,11,0.07); }
+[data-theme="dark"] .register-table tr.row-bank-unmatched { background: rgba(245,158,11,0.10); }
+.register-table tr.row-bank-sub { background: rgba(245,158,11,0.04); }
+[data-theme="dark"] .register-table tr.row-bank-sub { background: rgba(245,158,11,0.06); }
+.bank-desc { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+.sub-indent { padding-left: 28px !important; }
+.rec-check { color: var(--green); font-size: 13px; }
+.rec-none { color: var(--text-muted); font-size: 11px; }
+.row-actions { display: flex; gap: 4px; align-items: center; }
+.add-row td { padding: 10px 12px; }
+.amount-credit { color: var(--green); }
+.amount-debit  { color: var(--red); }
+.balance-cell { font-weight: 600; }
+
+/* ── Reconcile mode ── */
+#reconcile-view { display: none; }
+#reconcile-view.active { display: block; }
+#register-view { display: block; }
+#register-view.hidden { display: none; }
+.reconcile-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rec-panel { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); }
+.rec-panel-header { padding: 10px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--surface2); border-radius: var(--radius) var(--radius) 0 0; }
+.rec-row { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.rec-row:last-child { border-bottom: none; }
+.rec-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rec-row-date { color: var(--text-muted); font-size: 11px; min-width: 56px; }
+.rec-row-desc { flex: 1; }
+.rec-row-amt { font-weight: 600; white-space: nowrap; }
+.rec-suggestion { font-size: 11px; color: var(--text-muted); padding: 4px 8px; background: var(--surface2); border-radius: var(--radius-sm); margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rec-suggestion strong { color: var(--text); }
+.rec-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.match-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 11px; max-width: 200px; }
+
+/* ── Register filter bar ── */
+.reg-filter-bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.reg-filter-bar input[type=text],
+.reg-filter-bar input[type=number] { padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
+.reg-filter-bar input[type=text] { min-width: 180px; flex: 1; }
+.reg-filter-bar select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
+.reg-filter-bar .filter-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+/* ── Sortable headers ── */
+.register-table th.sortable { cursor: pointer; user-select: none; }
+.register-table th.sortable:hover { color: var(--text); }
+.sort-asc::after { content: ' ▲'; font-size: 9px; }
+.sort-desc::after { content: ' ▼'; font-size: 9px; }
+/* ── Balance variants ── */
+.balance-forecast { color: var(--text-muted); font-style: italic; }
+.balance-forecast::before { content: '~'; font-size: 10px; }
+.cutoff-row td { background: var(--surface2); border-top: 2px solid var(--accent); font-size: 12px; color: var(--text-muted); padding: 6px 10px; }
+.cutoff-row .cutoff-bal { font-weight: 700; color: var(--text); font-size: 13px; }
+.bal-col { font-weight: 600; color: var(--text); }
+.bal-forecast { font-style: italic; font-weight: 400; color: var(--text-muted); }
+.today-marker-row td { background: color-mix(in srgb, var(--accent) 12%, var(--surface2)); border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); font-size: 12px; padding: 6px 10px; color: var(--accent); }
+.row-recurring td { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); border-bottom: 1px dashed var(--border); font-style: italic; }
+[data-theme="dark"] .row-recurring td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.row-recurring .rec-label { font-size: 11px; color: var(--accent); font-style: normal; opacity: 0.8; }
+/* ── Pagination ── */
+.reg-pagination { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
+.reg-pagination button { padding: 3px 10px; font-size: 12px; }
+.reg-pagination .page-info { flex: 1; text-align: center; }
+
+/* ── Backup modal ── */
+#backup-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; z-index: 500;
+}
+#backup-modal.hidden { display: none; }
+#backup-modal .modal-box { width: 800px; max-width: 95vw; max-height: 85vh; overflow-y: auto; }
+.backup-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.backup-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.backup-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.backup-table tr:last-child td { border-bottom: none; }
+.backup-table tr:hover td { background: var(--surface2); }
+.trigger-badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+.trigger-manual { background: #dbeafe; color: #1d4ed8; }
+.trigger-auto { background: #dcfce7; color: #15803d; }
+.trigger-prerestore { background: #fef3c7; color: #92400e; }
+.trigger-uploaded { background: #f3e8ff; color: #6b21a8; }
+[data-theme="dark"] .trigger-manual { background: #1e3a5f; color: #93c5fd; }
+[data-theme="dark"] .trigger-auto { background: #14532d; color: #86efac; }
+[data-theme="dark"] .trigger-prerestore { background: #451a03; color: #fcd34d; }
+[data-theme="dark"] .trigger-uploaded { background: #3b0764; color: #d8b4fe; }
+
+/* ── Mobile (portrait phones / small tablets) ────────────────────────────────
+   The register is a seven-column table carrying ~560px of fixed-width columns
+   inside a wrapper that clips overflow, so on a phone the trailing columns —
+   the row action buttons — were cut off with no way to scroll to them. Below
+   this breakpoint each row becomes a stacked card and the surrounding chrome
+   collapses to a single column.
+
+   Cells are placed by their data-col role rather than by nth-child, so the
+   layout survives a column being added, removed, or reordered. */
+@media (max-width: 768px) {
+
+  /* Top bar — wrap the actions instead of pushing them past the right edge. */
+  #topbar { height: auto; min-height: 52px; padding: 8px 12px; flex-wrap: wrap; gap: 6px; }
+  #topbar .logo { height: 26px; }
+  #topbar .spacer { display: none; }
+  #topbar button { padding: 8px 10px; font-size: 12px; min-height: 36px; }
+  .section-nav { order: 5; flex: 1 0 100%; margin-right: 0; }
+  .section-btn { flex: 1; padding: 9px 10px; }
+
+  #app, #cashflow-app { padding: 14px 12px; }
+
+  /* Comfortable touch targets. iOS zooms the page when a focused field is
+     under 16px, which strands the user mid-form, so text inputs are bumped —
+     !important because several carry their own smaller font-size. */
+  button { min-height: 40px; }
+  .btn-sm { padding: 7px 10px; min-height: 34px; }
+  input[type=text], input[type=number], input[type=password],
+  input[type=date], select, textarea { font-size: 16px !important; }
+
+  .login-box { width: 100%; max-width: 340px; padding: 28px 22px; }
+  #login-overlay { padding: 16px; }
+
+  /* Dashboard */
+  .cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card { padding: 12px 14px; }
+  .card-value { font-size: 18px; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .chart-grid > *, .cards > * { min-width: 0; }
+  .chart-wrap { height: 220px !important; }
+  .acct-row { flex-wrap: wrap; }
+  .acct-name { flex: 1 1 100%; }
+
+  /* Modals — fit the viewport rather than overflow it. */
+  #unified-import-modal, #add-txn-modal,
+  #add-to-ledger-modal, #manage-acct-modal, #backup-modal {
+    align-items: flex-start; padding: 12px; overflow-y: auto;
+  }
+  .modal-box, #backup-modal .modal-box {
+    width: 100%; max-width: 100%; padding: 20px;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  .modal-footer { flex-wrap: wrap; }
+  .modal-footer button { flex: 1 1 auto; }
+  #backup-list-wrap { overflow-x: auto; }
+
+  /* Cash-flow toolbar and filter bar — one control per line where it matters. */
+  .cf-toolbar select { flex: 1 1 100%; min-width: 0; }
+  .cf-toolbar button { flex: 1 1 calc(50% - 4px); }
+  #cf-balance-summary { flex: 1 1 100%; margin-left: 0 !important; text-align: right; }
+  /* min-width defaults to auto on flex items, which resolves to a number input's
+     intrinsic ~200px min-content width and overrides the basis into a wrap. */
+  .reg-filter-bar input[type=text] { flex: 1 1 100%; min-width: 0; }
+  .reg-filter-bar input[type=number] { flex: 1 1 calc(50% - 8px); width: auto !important; min-width: 0; }
+  .reg-filter-bar select { flex: 1 1 auto; min-width: 0; }
+  .reg-filter-bar .filter-count { flex: 1 1 100%; margin-left: 0; text-align: right; }
+
+  /* ── Register: table → stacked cards ── */
+  .register-wrap { overflow-x: auto; }
+  .register-table thead { display: none; }
+  .register-table, .register-table tbody, .register-table tfoot,
+  .register-table tr, .register-table td { display: block; }
+
+  .register-table tr {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "date date amount"
+      "desc desc desc"
+      "rec  bal  actions";
+    gap: 3px 8px; padding: 10px 12px; align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .register-table tbody tr:last-child { border-bottom: none; }
+  /* Variant striping is set per-cell for the table layout; as blocks that would
+     paint in segments, so it moves to the row and the cells go transparent. */
+  .register-table td { padding: 0; border: none; background: none !important; }
+  .register-table td:empty { display: none; }
+
+  .register-table td[data-col="date"]    { grid-area: date; font-size: 11px; color: var(--text-muted); }
+  .register-table td[data-col="desc"]    { grid-area: desc; }
+  .register-table td[data-col="credit"],
+  .register-table td[data-col="debit"]   { grid-area: amount; text-align: right; font-weight: 600; font-size: 15px; }
+  .register-table td[data-col="balance"] { grid-area: bal; text-align: right; font-size: 12px; }
+  .register-table td[data-col="balance"]::before { content: 'bal '; color: var(--text-muted); font-weight: 400; font-style: normal; }
+  /* A predicted row has no balance yet — it carries an em dash, which needs no label. */
+  .register-table tr.row-recurring td[data-col="balance"]::before { content: none; }
+  .register-table td[data-col="rec"]     { grid-area: rec; }
+  .register-table td[data-col="actions"] { grid-area: actions; }
+  .register-table td[data-col="actions"] .row-actions { justify-content: flex-end; }
+  /* Empty-state and "no transactions yet" rows span the whole card. */
+  .register-table td[colspan="7"] { grid-column: 1 / -1; grid-row: 1; }
+
+  /* A matched bank row hangs off its ledger entry — no date or amount of its own. */
+  .register-table tr.row-bank-sub {
+    grid-template-areas:
+      "desc desc desc"
+      "rec  .    actions";
+    padding-left: 22px;
+  }
+  .register-table tr.row-bank-sub td[data-col="desc"] { padding-left: 0 !important; }
+
+  /* Marker rows are one line: date, label, balance. */
+  .register-table tr.today-marker-row,
+  .register-table tr.cutoff-row {
+    grid-template-areas: "date desc bal";
+    align-items: baseline;
+  }
+  .register-table tr.today-marker-row {
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+    border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+    color: var(--accent);
+  }
+  .register-table tr.cutoff-row {
+    background: var(--surface2); border-top: 2px solid var(--accent);
+    color: var(--text-muted); font-size: 12px;
+  }
+  .register-table tr.row-recurring {
+    background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+    border-bottom: 1px dashed var(--border); font-style: italic;
+  }
+  [data-theme="dark"] .register-table tr.row-recurring {
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  }
+
+  .match-select { max-width: none; width: 100%; }
+  .row-actions { flex-wrap: wrap; }
+
+  /* ── Reconcile ── */
+  .reconcile-panels { grid-template-columns: 1fr; }
+  .rec-row-top { flex-wrap: wrap; }
+  .rec-row-desc { flex: 1 1 100%; order: 3; font-size: 12px; }
+  .rec-actions > * { flex: 1 1 auto; }
+  .rec-actions .match-select { flex: 1 1 100%; }
+  /* Score and matched entry side by side leaves both in a narrow column. */
+  .rec-pending-meta { flex-wrap: wrap; }
+  .rec-pending-meta > span { flex: 1 1 100%; }
+}
+
+/* Very narrow phones — the metric cards stop fitting two across. */
+@media (max-width: 360px) {
+  .cards { grid-template-columns: 1fr; }
+}
+</style>
+<link rel="stylesheet" href="/static/cards.css">
+<link rel="stylesheet" href="/static/ask.css">
+<link rel="stylesheet" href="/static/importprofiles.css">
+<link rel="stylesheet" href="/static/accounts.css">
+<link rel="stylesheet" href="/static/balances.css">
+<link rel="stylesheet" href="/static/cashflow.css">
+<link rel="stylesheet" href="/static/ai.css">
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-overlay">
+  <div class="login-box">
+    <h1>flow</h1>
+    <p>Personal finance dashboard</p>
+    <input type="password" id="login-pw" placeholder="Password" autocomplete="current-password">
+    <div id="login-error">Incorrect password</div>
+    <button class="btn-primary" onclick="doLogin()">Sign in</button>
+  </div>
+</div>
+
+<!-- Unified Import modal -->
+<div id="unified-import-modal" class="hidden">
+  <div class="modal-box">
+    <h2>Import</h2>
+    <p>Select a bank/ledger export or a credit card statement (CSV/TSV/XLSX). Each account reads its files with a saved import format; a layout Flow hasn't seen gets a suggested format to check and save. Balance-sheet values are entered under Update balances on the Dashboard. Select several files to import them together: each goes to the account its transactions already match, and anything Flow can't be sure of waits for you to pick.</p>
+    <input type="file" id="uimp-file" accept=".csv,.xlsx,.tsv,.txt" multiple onchange="uimpFileChanged()">
+    <div id="uimp-status"></div>
+    <div id="uimp-batch"></div>
+    <div id="uimp-acct-row">
+      <label>Account</label>
+      <select id="uimp-acct-select" onchange="uimpAcctChanged()"></select>
+    </div>
+    <div id="uimp-card-opts">
+      <div id="uimp-card-suggest"></div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeImport()">Cancel</button>
+      <button class="btn-primary" id="uimp-btn" onclick="uimpAction()" disabled>Detect</button>
+    </div>
+  </div>
+</div>
+
+<!-- Update balances modal (static/balances.js) -->
+<div id="bal-modal" class="hidden bal-overlay">
+  <div class="modal-box bal-box">
+    <div class="bal-head">
+      <h2>Update balances</h2>
+      <div class="bal-tabs">
+        <button class="bal-tab active" data-mode="paste" onclick="balMode('paste')">Paste</button>
+        <button class="bal-tab" data-mode="type" onclick="balMode('type')">Type</button>
+        <button class="bal-tab" data-mode="file" onclick="balMode('file')">File</button>
+      </div>
+      <label class="bal-period">Period <input type="month" id="bal-period" onchange="if (BAL.plan) balPreview(); else if (BAL.mode==='type') balRenderTyping()"></label>
+    </div>
+    <p>Balances are filed by month: this month is suggested, and you can pick another (a month-end snapshot can go to the next month). Accounts you don't update keep their last value until you do.</p>
+    <div id="bal-paste-pane">
+      <textarea id="bal-text" rows="7" placeholder="Copy your bank's account summary page (select all, copy) and paste it here. Flow reads it on this server; nothing is sent anywhere."></textarea>
+      <div class="bal-row"><button class="btn-primary" onclick="balRead()">Read</button>
+        <span class="sub">Accounts are matched by the last 4 digits of their number; pick an account once and Flow remembers it.</span></div>
+    </div>
+    <div id="bal-file-pane" class="hidden">
+      <div class="bal-row"><input type="file" id="bal-file" accept=".csv,.tsv,.txt,.xlsx,.xlsm" onchange="balReadFile()">
+        <span class="sub">A holdings or accounts export from a brokerage or bank. Flow reads it on this server with a saved
+          balance format (set one up the first time) and matches each account by its last 4 digits, a paste marker or its name.</span></div>
+    </div>
+    <div id="bal-type-pane" class="hidden">
+      <div id="bal-type-list"></div>
+      <div class="bal-row"><button class="btn-primary" onclick="BAL.checked = {}; balPreview()">Check</button>
+        <span class="sub">Enter liabilities as the amount owed. Blank fields are left alone.</span></div>
+    </div>
+    <div id="bal-msg"></div>
+    <div id="bal-preview"></div>
+    <details class="bal-th">
+      <summary>Change alerts</summary>
+      <div class="bal-row">Flag a change over <input type="number" id="bal-th-pct" min="0" step="0.5" style="width:70px">%
+        or over $<input type="number" id="bal-th-abs" min="0" step="1000" style="width:110px"> since the previous value
+        <button class="btn-sm" onclick="balSaveThresholds()">Save</button></div>
+      <div class="sub">0 turns a check off. Each account can override these under Manage Accounts.</div>
+    </details>
+    <div class="modal-footer">
+      <button onclick="balClose()">Close</button>
+      <button class="btn-primary" id="bal-apply" onclick="balApply()" disabled>Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Balance-sheet account editor (static/balances.js) -->
+<div id="bal-acct-modal" class="hidden bal-overlay">
+  <div class="modal-box acct-dlg">
+    <h2 id="bal-acct-title">Edit balance account</h2>
+    <div class="acct-field"><label for="bal-a-name">Name</label><input type="text" id="bal-a-name" maxlength="80"></div>
+    <div class="acct-field"><label for="bal-a-inst">Institution (optional)</label><input type="text" id="bal-a-inst" maxlength="120"></div>
+    <div class="acct-dlg-section">
+      <div class="acct-dlg-h">Balance details</div>
+      <div class="acct-dlg-pair">
+        <div class="acct-field"><label for="bal-a-type">Type</label>
+          <select id="bal-a-type"><option value="asset">Asset</option><option value="liability">Liability</option></select></div>
+        <div class="acct-field"><label for="bal-a-last4">Account number, last 4 digits</label>
+          <input type="text" id="bal-a-last4" placeholder="e.g. 1234"></div>
+      </div>
+      <div class="acct-dlg-help">Several numbers: comma-separated. Pasted account summaries are matched to this account by them.</div>
+      <div class="acct-dlg-pair">
+        <div class="acct-field"><label for="bal-a-pct">Alert over %</label><input type="number" id="bal-a-pct" min="0" step="0.5"></div>
+        <div class="acct-field"><label for="bal-a-abs">Alert over $</label><input type="number" id="bal-a-abs" min="0" step="1000"></div>
+      </div>
+      <div class="acct-dlg-help">Warn when a new value moves this much from the last one. Blank uses the global setting; 0 turns the alert off.</div>
+    </div>
+    <div class="acct-dlg-section" id="bal-hist-wrap"><div class="acct-dlg-h">History</div><div id="bal-hist"></div></div>
+    <div class="acct-dlg-section" id="bal-formats"></div>
+    <div class="acct-dlg-section" id="bal-markers-wrap"><div class="acct-dlg-h">Paste markers</div>
+      <div class="acct-dlg-help">Where Flow finds this account's balance on a pasted account summary.</div><div id="bal-markers"></div></div>
+    <div class="acct-dlg-section" id="bal-a-options">
+      <div class="acct-dlg-h">Options</div>
+      <label class="acct-dlg-check"><input type="checkbox" id="bal-a-archived"> Archived (closed: stops carrying its last value forward)</label>
+    </div>
+    <div id="bal-acct-err" class="acct-dlg-err"></div>
+    <div class="modal-footer">
+      <button id="bal-acct-del" class="acct-dlg-delete" onclick="balDeleteAccount()">Delete</button>
+      <button onclick="balCloseAccount()">Cancel</button>
+      <button class="btn-primary" onclick="balSaveAccount()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Transaction modal -->
+<div id="add-txn-modal" class="hidden">
+  <div class="modal-box">
+    <h2 id="add-txn-title">Add Transaction</h2>
+    <input type="hidden" id="edit-txn-id">
+    <label style="font-size:12px;color:var(--text-muted)">Date</label>
+    <input type="date" id="txn-date" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <label style="font-size:12px;color:var(--text-muted)">Description</label>
+    <input type="text" id="txn-desc" list="txn-desc-list" autocomplete="off" placeholder="Description" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <datalist id="txn-desc-list"></datalist>
+    <label style="font-size:12px;color:var(--text-muted)">Amount <span style="font-weight:400">(negative = debit/out, positive = credit/in)</span></label>
+    <input type="text" id="txn-amount" placeholder="-1234.56 or 1234.56" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px;margin-bottom:8px">
+    <label style="font-size:12px;color:var(--text-muted)">Notes (optional)</label>
+    <input type="text" id="txn-notes" placeholder="" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <div id="add-txn-error" style="color:var(--red);font-size:12px;display:none;margin-top:6px"></div>
+    <div class="modal-footer" style="margin-top:12px">
+      <button onclick="closeAddTxn()">Cancel</button>
+      <button class="btn-primary" onclick="doSaveTxn()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cash account dialog, new and edit (the shared account-dialog frame: static/accounts.css) -->
+<div id="manage-acct-modal" class="hidden">
+  <div class="modal-box acct-dlg">
+    <h2 id="mgmt-title">Edit cash account</h2>
+    <div class="acct-field"><label for="mgmt-name">Name</label>
+      <input type="text" id="mgmt-name" maxlength="80" placeholder="e.g. Everyday checking"></div>
+    <div class="acct-field"><label for="mgmt-institution">Institution (optional)</label>
+      <input type="text" id="mgmt-institution" maxlength="120">
+      <div class="acct-dlg-help">Filled in from the import format on first import.</div></div>
+    <div class="acct-field"><label for="mgmt-notes">Notes</label><textarea id="mgmt-notes" rows="2"></textarea></div>
+    <div class="acct-dlg-section" id="mgmt-opening-section">
+      <div class="acct-dlg-h">Opening balance</div>
+      <div class="acct-field"><label for="mgmt-opening">Balance before the first transaction</label>
+        <input type="number" id="mgmt-opening" value="0" step="0.01"></div>
+    </div>
+    <div class="acct-dlg-section" id="mgmt-cutoff-section">
+      <div class="acct-dlg-h">Balance cutoff</div>
+      <div class="acct-dlg-help">Bank transactions before this date are skipped on import. The balance below overrides the opening balance used for calculations.</div>
+      <div class="acct-dlg-pair">
+        <div class="acct-field"><label for="mgmt-cutoff-date">Cutoff date</label><input type="date" id="mgmt-cutoff-date"></div>
+        <div class="acct-field"><label for="mgmt-cutoff-balance">Balance as of cutoff</label>
+          <input type="text" id="mgmt-cutoff-balance" placeholder="e.g. 12345.67"></div>
+      </div>
+      <label class="acct-dlg-check"><input type="checkbox" id="mgmt-clear-cutoff"> Clear cutoff (revert to opening balance)</label>
+    </div>
+    <div class="acct-dlg-section" id="mgmt-formats"></div>
+    <div class="acct-dlg-section">
+      <div class="acct-dlg-h">Options</div>
+      <label class="acct-dlg-check"><input type="checkbox" id="mgmt-is-default"> Default account (selected automatically on open)</label>
+    </div>
+    <div id="mgmt-error" class="acct-dlg-err"></div>
+    <div class="modal-footer">
+      <button class="acct-dlg-delete" id="mgmt-delete" onclick="doDeleteRAcctFromMgmt()">Delete</button>
+      <button onclick="closeMgmtAcct()">Cancel</button>
+      <button class="btn-primary" onclick="doSaveMgmtAcct()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add to Ledger modal -->
+<div id="add-to-ledger-modal" class="hidden">
+  <div class="modal-box">
+    <h2>Add to Ledger</h2>
+    <p style="font-size:12px;color:var(--text-muted)" id="atl-bank-desc"></p>
+    <input type="hidden" id="atl-bank-txn-id">
+    <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Description for ledger</label>
+    <input type="text" id="atl-desc" list="atl-desc-list" autocomplete="off" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <datalist id="atl-desc-list"></datalist>
+    <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Notes (optional)</label>
+    <input type="text" id="atl-notes" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:13px;margin-top:4px">
+    <div class="modal-footer" style="margin-top:12px">
+      <button onclick="closeAtl()">Cancel</button>
+      <button class="btn-primary" onclick="doAddToLedger()">Add &amp; Reconcile</button>
+    </div>
+  </div>
+</div>
+
+<!-- Backup modal -->
+<div id="pw-modal" class="cd-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pw-title">
+  <div class="modal-box">
+    <h2 id="pw-title">Change password</h2>
+    <p class="cd-note" style="margin:4px 0 10px">The dashboard password is kept on this server as a hash. Changing it ends every session, this one included.</p>
+    <label class="f">Current password</label><input type="password" id="pw-current" autocomplete="current-password">
+    <label class="f" style="margin-top:8px">New password</label><input type="password" id="pw-new" autocomplete="new-password">
+    <label class="f" style="margin-top:8px">New password again</label><input type="password" id="pw-new2" autocomplete="new-password">
+    <div id="pw-err" class="err" style="margin-top:8px;min-height:16px"></div>
+    <div class="modal-footer"><button onclick="closeChangePassword()">Cancel</button><button class="btn-primary" onclick="doChangePassword()">Change password</button></div>
+  </div>
+</div>
+
+<div id="backup-modal" class="hidden">
+  <div class="modal-box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <h2 style="flex:1">Backups</h2>
+      <label style="cursor:pointer">
+        <input type="file" id="backup-upload-input" accept=".zip" style="display:none" onchange="doUploadBackup(this)">
+        <span class="btn-sm" style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" onclick="document.getElementById('backup-upload-input').click()">↑ Upload</span>
+      </label>
+      <button class="btn-primary btn-sm" onclick="doCreateBackup()">+ New Backup</button>
+    </div>
+    <p>Backups are stored on the server. A backup is automatically created before the first import each day.</p>
+    <div id="backup-list-wrap">
+      <div class="empty" style="padding:30px 0">Loading…</div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;margin-top:4px">
+      <button id="backup-delete-btn" onclick="doDeleteBackups()" style="color:var(--red);border-color:var(--red);display:none">Delete Selected</button>
+      <button onclick="closeBackups()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Top bar -->
+<div id="topbar">
+  <a href="/" class="logo-link" title="Reload Flow" onclick="return reloadApp(event)"><img src="/static/logo.png" alt="Flow" class="logo"></a>
+  <div class="section-nav">
+    <button class="section-btn active" id="nav-dashboard" onclick="showSection('dashboard')">Dashboard</button>
+    <button class="section-btn" id="nav-cashflow" onclick="showSection('cashflow')">Cash Flow</button>
+    <button class="section-btn" id="nav-cards" onclick="showSection('cards')">Cards</button>
+  </div>
+  <button id="ask-btn" class="hidden" title="Ask about your spending, or have it organize things for you">Assistant</button>
+  <button onclick="openImport()">↑ Import</button>
+  <button id="theme-btn" onclick="toggleTheme()">◑</button>
+  <button onclick="aiOpen()" title="Whether AI is on, which model each feature uses, and every request sent">AI</button>
+  <button onclick="openBackups()">Backups</button>
+  <div class="signout-wrap">
+    <button id="signout-btn" onclick="toggleSignoutMenu(event)" aria-haspopup="true" aria-expanded="false">Sign out ▾</button>
+    <div id="signout-menu" class="signout-menu hidden" role="menu">
+      <button role="menuitem" onclick="doLogout()">Sign out</button>
+      <button role="menuitem" onclick="doLogoutEverywhere()">Sign out everywhere<span class="sub">every browser and device, this one too</span></button>
+      <button role="menuitem" onclick="openChangePassword()">Change password…<span class="sub">signs every browser out</span></button>
+      <div id="app-version" class="app-version"></div>
+    </div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <!-- Metric cards -->
+  <div class="cards">
+    <div class="card">
+      <div class="card-label">Net Worth</div>
+      <div class="card-value" id="c-nw">—</div>
+      <div class="card-delta" id="c-nw-d"></div>
+      <div class="card-carried" id="c-nw-carried"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Assets</div>
+      <div class="card-value" id="c-assets">—</div>
+      <div class="card-delta" id="c-assets-d"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Liabilities</div>
+      <div class="card-value" id="c-liab">—</div>
+      <div class="card-delta" id="c-liab-d"></div>
+    </div>
+    <div class="card">
+      <div class="card-label" id="c-top-label">Largest Asset</div>
+      <div class="card-value" id="c-top">—</div>
+      <div class="card-delta" id="c-top-d"></div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
+    <button class="tab-btn" onclick="switchTab('assets',this)">Assets</button>
+    <button class="tab-btn" onclick="switchTab('liabilities',this)">Liabilities</button>
+    <button class="tab-btn" onclick="switchTab('cashflow',this)">Cash Flow Analysis</button>
+  </div>
+
+  <!-- Overview -->
+  <div id="tab-overview" class="tab-panel active">
+    <div class="chart-card full" style="margin-bottom:16px">
+      <div class="chart-title">
+        Net Worth Over Time
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="nw-dollar" onclick="setNwMode('$',this)">$</button>
+          <button class="toggle-btn" id="nw-pct" onclick="setNwMode('%',this)">%</button>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:260px"><canvas id="chart-nw"></canvas></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-title">Asset Allocation</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chart-alloc"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Debt-to-Asset Ratio</div>
+        <div class="stat-big" id="dta-stat">—</div>
+        <div class="card-delta" id="dta-delta" style="margin-bottom:8px"></div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chart-dta"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card full">
+      <div class="chart-title">Month-over-Month Change</div>
+      <div class="chart-wrap" style="height:300px"><canvas id="chart-mom"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Assets -->
+  <div id="tab-assets" class="tab-panel">
+    <div class="chart-card">
+      <div class="chart-title">Asset Accounts Over Time</div>
+      <div class="chart-legend" id="legend-assets"></div>
+      <div class="chart-wrap" style="height:340px"><canvas id="chart-assets"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Liabilities -->
+  <div id="tab-liabilities" class="tab-panel">
+    <div class="chart-card">
+      <div class="chart-title">Liabilities Over Time</div>
+      <div class="chart-legend" id="legend-liab"></div>
+      <div class="chart-wrap" style="height:340px"><canvas id="chart-liab"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Cash Flow (static/cashflow.js) -->
+  <div id="tab-cashflow" class="tab-panel"></div>
+
+  <!-- Account manager -->
+  <div id="acct-panel">
+    <div style="display:flex;align-items:center;gap:8px">
+      <button id="acct-toggle" onclick="toggleAcctPanel()">▸ Manage Accounts</button>
+      <button class="btn-sm" onclick="balOpenAccount()" style="white-space:nowrap">+ New balance account</button>
+      <button class="btn-primary btn-sm" onclick="balOpen()" style="white-space:nowrap;margin-right:10px">Update balances</button>
+    </div>
+    <div id="acct-body">
+      <div id="acct-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Cash Flow App -->
+<div id="cashflow-app" class="hidden">
+  <!-- Toolbar -->
+  <div class="cf-toolbar">
+    <select id="cf-account-select" onchange="cfSelectAccount(this.value)">
+      <option value="">— select account —</option>
+    </select>
+    <button onclick="openAddRAcct()">+ New cash account</button>
+    <button onclick="toggleReconcile()" id="cf-reconcile-btn" style="display:none">⇄ Reconcile</button>
+    <button onclick="cfToggleBankSubs()" id="cf-banksubs-btn" style="display:none">⇌ Show matched</button>
+    <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
+    <button onclick="openMgmtAcct()" id="cf-manage-btn" style="display:none">⚙ Manage</button>
+    <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
+  </div>
+
+  <!-- Normal register view -->
+  <div id="register-view">
+    <div class="register-wrap">
+      <div class="reg-filter-bar" id="reg-filter-bar" style="display:none">
+        <input type="text" id="reg-search" placeholder="Search description, amount…" oninput="cfApplyFilter()">
+        <input type="number" id="reg-min-credit" placeholder="Min credit $" step="0.01" min="0" oninput="cfApplyFilter()" style="width:120px">
+        <input type="number" id="reg-min-debit" placeholder="Min debit $" step="0.01" min="0" oninput="cfApplyFilter()" style="width:120px">
+        <select id="reg-rec-filter" onchange="cfApplyFilter()">
+          <option value="all">All</option>
+          <option value="reconciled">Reconciled</option>
+          <option value="unreconciled">Unreconciled</option>
+        </select>
+        <button class="btn-sm clear-filters" onclick="cfClearFilter()" id="reg-clear-filter" hidden>✕ Clear filters</button>
+        <span class="filter-count" id="reg-filter-count"></span>
+      </div>
+      <div class="reg-pagination" id="reg-pagination-top" style="display:none">
+        <button id="reg-prev-top" onclick="cfChangePage(-1)">‹ Prev</button>
+        <span class="page-info" id="reg-page-info-top"></span>
+        <button id="reg-next-top" onclick="cfChangePage(1)">Next ›</button>
+      </div>
+      <table class="register-table">
+        <thead>
+          <tr id="reg-thead-row">
+            <th style="width:100px">Date</th>
+            <th>Description</th>
+            <th class="num" style="width:110px">Credit</th>
+            <th class="num" style="width:110px">Debit</th>
+            <th class="num" style="width:120px">Balance</th>
+            <th style="width:40px">✓</th>
+            <th style="width:80px"></th>
+          </tr>
+        </thead>
+        <tbody id="register-tbody">
+          <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>
+
+        </tbody>
+        <tfoot id="register-tfoot"></tfoot>
+      </table>
+      <div class="reg-pagination" id="reg-pagination" style="display:none">
+        <button id="reg-prev" onclick="cfChangePage(-1)">‹ Prev</button>
+        <span class="page-info" id="reg-page-info"></span>
+        <button id="reg-next" onclick="cfChangePage(1)">Next ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reconcile view -->
+  <div id="reconcile-view">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:13px;font-weight:600">Reconcile Transactions</span>
+      <button onclick="toggleReconcile()">✕ Done Reconciling</button>
+    </div>
+    <div id="rec-pending-section" style="display:none;margin-bottom:16px">
+      <div class="rec-panel-header" style="margin-bottom:8px">Auto-Matched — Pending Confirmation</div>
+      <div id="rec-pending-list"></div>
+    </div>
+    <div class="reconcile-panels">
+      <div class="rec-panel">
+        <div class="rec-panel-header">Unmatched Ledger Entries</div>
+        <div id="rec-manual-list"></div>
+      </div>
+      <div class="rec-panel">
+        <div class="rec-panel-header" style="display:flex;align-items:center;gap:8px">
+          <span style="flex:1">Unmatched Bank Transactions</span>
+          <label style="font-size:11px;font-weight:400;display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="rec-select-all" onchange="recToggleAll(this.checked)"> All
+          </label>
+        </div>
+        <div id="rec-bulk-bar" style="display:none;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;gap:8px;align-items:center">
+          <span id="rec-sel-count" style="font-size:12px;color:var(--text-muted);flex:1"></span>
+          <button class="btn-sm btn-primary" onclick="doBulkAddToLedger()">+ Add Selected to Ledger</button>
+          <button class="btn-sm" style="color:var(--red)" onclick="doBulkDelete()">Delete Selected</button>
+        </div>
+        <div id="rec-bank-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cards App (credit cards: upload-only, never part of the dashboard) -->
+<div id="cards-app" class="hidden">
+  <div class="cd-toolbar">
+    <select id="cd-card-filter" onchange="cdFilterChanged()"><option value="">All cards</option></select>
+    <select id="cd-period" onchange="cdFilterChanged()">
+      <option value="all">All time</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option>
+      <option value="12m">Last 12 months</option><option value="ytd" selected>This year</option><option value="lastyear">Last year</option>
+      <option value="custom">Custom…</option>
+    </select>
+    <span id="cd-custom-range" style="display:none;gap:6px;align-items:center">
+      <input type="date" id="cd-from" onchange="cdFilterChanged()"> → <input type="date" id="cd-to" onchange="cdFilterChanged()">
+    </span>
+    <label title="Limit to the window every selected card covers, so cards are compared fairly"><input type="checkbox" id="cd-common" onchange="cdFilterChanged()"> Common period</label>
+    <button class="btn-sm clear-filters" id="cd-clear-filters" onclick="cdClearFilters()" hidden>✕ Clear filters</button>
+    <button onclick="cdOpenAccount()">+ New card account</button>
+    <span id="cd-ai-banner" class="cd-banner"></span>
+  </div>
+  <div class="cd-tabs" id="cd-tabs"></div>
+  <div id="cd-panels"></div>
+</div>
+
+<script>
+const ASSET_COLORS  = ['#378ADD','#5DCAA5','#D85A30','#7F77DD','#BA7517','#D4537E','#63A02A'];
+const LIAB_COLORS   = ['#E24B4A','#F09595'];
+const GRID          = 'rgba(128,128,128,0.12)';
+const TICK          = '#888';
+
+let tsData    = null;     // timeseries API response (regular accounts)
+let regTsData = {periods: [], accounts: []};  // register account month-end balances
+let accounts  = [];   // accounts list
+let charts = {};     // chart instances keyed by id
+let nwMode = '$';
+
+// ── Formatting ────────────────────────────────────────────────────────────────
+function fmt(v) {
+  if (v === null || v === undefined) return '—';
+  const sign = v < 0 ? '-' : '';
+  const a = Math.abs(v);
+  if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return sign + '$' + Math.round(a / 1000) + 'K';
+  return sign + '$' + Math.round(a);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined) return '—';
+  const sign = v >= 0 ? '+' : '';
+  return sign + v.toFixed(1) + '%';
+}
+function deltaClass(v, invertGood) {
+  if (v === null || v === undefined || v === 0) return 'delta-neutral';
+  const good = invertGood ? v < 0 : v > 0;
+  return good ? 'delta-up' : 'delta-down';
+}
+function deltaArrow(v, invertGood) {
+  if (v === null || v === undefined || v === 0) return '';
+  const good = invertGood ? v < 0 : v > 0;
+  return (v > 0 ? '▲ ' : '▼ ') + fmt(Math.abs(v));
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const pw = document.getElementById('login-pw').value;
+  const res = await fetch('/api/auth/login', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({password: pw})
+  });
+  if (res.ok) {
+    document.getElementById('login-overlay').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    loadAll();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+// ── Backup modal ─────────────────────────────────────────────────────────────
+
+function openBackups() {
+  document.getElementById('backup-modal').classList.remove('hidden');
+  loadBackupList();
+}
+
+function closeBackups() {
+  document.getElementById('backup-modal').classList.add('hidden');
+}
+
+async function loadBackupList() {
+  const wrap = document.getElementById('backup-list-wrap');
+  wrap.innerHTML = '<div class="empty" style="padding:30px 0">Loading…</div>';
+  document.getElementById('backup-delete-btn').style.display = 'none';
+  const res = await fetch('/api/backups');
+  if (!res.ok) { wrap.innerHTML = '<div class="empty" style="padding:30px 0;color:var(--red)">Failed to load backups</div>'; return; }
+  const backups = await res.json();
+  if (!backups.length) {
+    wrap.innerHTML = '<div class="empty" style="padding:30px 0">No backups yet</div>';
+    return;
+  }
+  const triggerLabel = {
+    'manual': ['Manual', 'trigger-manual'],
+    'auto-pre-import': ['Auto (pre-import)', 'trigger-auto'],
+    'pre-restore': ['Auto (pre-restore)', 'trigger-prerestore'],
+    'uploaded': ['Uploaded', 'trigger-uploaded'],
+  };
+  const rows = backups.map(b => {
+    const dt = new Date(b.created_at);
+    const dateStr = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const [label, cls] = triggerLabel[b.trigger] || [b.trigger, 'trigger-manual'];
+    const size = b.size_bytes < 1024*1024
+      ? (b.size_bytes/1024).toFixed(1)+' KB'
+      : (b.size_bytes/1024/1024).toFixed(1)+' MB';
+    const t = b.tables || {}, n = v => Number.isFinite(Number(v)) ? Number(v) : 0;   // counts come from the zip
+    const eid = CSS.escape(b.id);
+    return `<tr>
+      <td><input type="checkbox" class="backup-cb" value="${escHtml(b.id)}" onchange="updateBackupDeleteBtn()"></td>
+      <td style="white-space:nowrap">${escHtml(dateStr)}</td>
+      <td><span class="trigger-badge ${cls}">${escHtml(String(label))}</span></td>
+      <td style="text-align:right">${n(t.accounts)}</td>
+      <td style="text-align:right">${n(t.balances)}</td>
+      <td style="text-align:right">${n(t.register_accounts)}</td>
+      <td style="text-align:right">${n(t.transactions)}</td>
+      <td style="text-align:right;white-space:nowrap">${size}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-sm" onclick="doDownloadBackup(${escHtml(JSON.stringify(b.id))})">↓</button>
+        <button class="btn-sm btn-primary" onclick="doRestoreBackup(${escHtml(JSON.stringify(b.id))})">Restore</button>
+      </td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table class="backup-table">
+    <thead><tr>
+      <th><input type="checkbox" id="backup-select-all" onchange="toggleAllBackups(this)"></th>
+      <th>Date / Time</th><th>Trigger</th>
+      <th style="text-align:right">Accounts</th>
+      <th style="text-align:right">Balances</th>
+      <th style="text-align:right">Reg. Accounts</th>
+      <th style="text-align:right">Transactions</th>
+      <th style="text-align:right">Size</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function updateBackupDeleteBtn() {
+  const checked = document.querySelectorAll('.backup-cb:checked').length;
+  document.getElementById('backup-delete-btn').style.display = checked ? '' : 'none';
+  const all = document.querySelectorAll('.backup-cb').length;
+  const sa = document.getElementById('backup-select-all');
+  if (sa) sa.checked = checked === all && all > 0;
+}
+
+function toggleAllBackups(cb) {
+  document.querySelectorAll('.backup-cb').forEach(el => { el.checked = cb.checked; });
+  updateBackupDeleteBtn();
+}
+
+async function doCreateBackup() {
+  const btn = document.querySelector('#backup-modal button.btn-primary[onclick="doCreateBackup()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const res = await fetch('/api/backups', {method:'POST'});
+  if (btn) { btn.disabled = false; btn.textContent = '+ New Backup'; }
+  if (res.ok) loadBackupList();
+  else alert('Backup failed');
+}
+
+function doDownloadBackup(id) {
+  const a = document.createElement('a');
+  a.href = `/api/backups/${encodeURIComponent(id)}/download`;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function doRestoreBackup(id) {
+  if (!confirm('Restore this backup? All current data will be replaced. A safety backup of the current state will be created first.')) return;
+  const res = await fetch(`/api/backups/${encodeURIComponent(id)}/restore`, {method:'POST'});
+  if (res.ok) {
+    alert('Restore complete. The page will reload.');
+    location.reload();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    alert('Restore failed: ' + (d.detail || res.status));
+  }
+}
+
+async function doDeleteBackups() {
+  const ids = [...document.querySelectorAll('.backup-cb:checked')].map(el => el.value);
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} backup(s)? This cannot be undone.`)) return;
+  const res = await fetch('/api/backups', {
+    method: 'DELETE',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ids}),
+  });
+  if (res.ok) loadBackupList();
+  else alert('Delete failed');
+}
+
+async function doUploadBackup(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/backups/upload', {method:'POST', body: fd});
+  if (res.ok) loadBackupList();
+  else {
+    const d = await res.json().catch(() => ({}));
+    alert('Upload failed: ' + (d.detail || res.status));
+  }
+}
+
+function toggleSignoutMenu(ev) {
+  ev.stopPropagation();
+  const menu = document.getElementById('signout-menu');
+  const open = menu.classList.toggle('hidden') === false;
+  document.getElementById('signout-btn').setAttribute('aria-expanded', String(open));
+  if (open) showAppVersion();
+}
+// The running version (backend/VERSION), under the Sign out menu. Fetched when the menu opens.
+async function showAppVersion() {
+  const el = document.getElementById('app-version');
+  if (el.textContent) return;
+  try {
+    const res = await fetch('/api/version');
+    if (res.ok) el.textContent = 'Flow ' + ((await res.json()).version || 'unknown');
+  } catch (e) { /* offline: leave it blank */ }
+}
+document.addEventListener('click', e => {
+  const menu = document.getElementById('signout-menu');
+  if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target)) {
+    menu.classList.add('hidden');
+    document.getElementById('signout-btn').setAttribute('aria-expanded', 'false');
+  }
+});
+
+// Ends every session (a copied cookie, a forgotten browser), then signs this one out too.
+async function doLogoutEverywhere() {
+  document.getElementById('signout-menu').classList.add('hidden');
+  if (!confirm('Sign out of Flow in every browser and on every device, including this one?')) return;
+  const res = await fetch('/api/auth/logout-everywhere', {method: 'POST'});
+  if (!res.ok && res.status !== 401) { alert('Could not sign out everywhere (' + res.status + ').'); return; }
+  _showLogin();
+}
+
+// The top-left logo: a full reload onto the Dashboard. index.html is no-cache and every
+// /static file is revalidated (and ?v=-versioned), so this picks up a new deploy too.
+// Ctrl/Cmd/Shift/middle click keep the link's normal behaviour (new tab or window).
+function reloadApp(e) {
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0)) return true;
+  window.location.replace('/');
+  return false;
+}
+
+async function doLogout() {
+  document.getElementById('signout-menu').classList.add('hidden');
+  await fetch('/api/auth/logout', {method:'POST'});
+  _showLogin();
+}
+
+// Sign out ▾ → Change password (POST /api/auth/change-password: the current password is required).
+function openChangePassword() {
+  document.getElementById('signout-menu').classList.add('hidden');
+  for (const id of ['pw-current', 'pw-new', 'pw-new2']) document.getElementById(id).value = '';
+  document.getElementById('pw-err').textContent = '';
+  document.getElementById('pw-modal').classList.remove('hidden');
+  document.getElementById('pw-current').focus();
+}
+function closeChangePassword() { document.getElementById('pw-modal').classList.add('hidden'); }
+async function doChangePassword() {
+  const err = document.getElementById('pw-err');
+  const current = document.getElementById('pw-current').value, nw = document.getElementById('pw-new').value;
+  if (!nw) { err.textContent = 'Type the new password.'; return; }
+  if (nw !== document.getElementById('pw-new2').value) { err.textContent = 'The new passwords differ.'; return; }
+  const res = await fetch('/api/auth/change-password', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                         body: JSON.stringify({current, new: nw})});
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { err.textContent = typeof d.detail === 'string' ? d.detail : 'Could not change the password (' + res.status + ').'; return; }
+  closeChangePassword();
+  alert('Password changed. Sign in again with the new one.');
+  _showLogin();
+}
+
+function _showLogin() {
+  for (const [name, id] of Object.entries(SECTIONS)) {
+    document.getElementById(id).classList.add('hidden');
+    document.getElementById('nav-' + name).classList.toggle('active', name === 'dashboard');
+  }
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('login-pw').value = '';
+  cdReset();
+  cfCurrentId = null; cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null}; cfAccounts = []; cfReconciling = false; cfPage = 1;
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem('flow-theme', t);
+}
+(function() {
+  const t = localStorage.getItem('flow-theme');
+  if (t) document.documentElement.dataset.theme = t;
+})();
+
+// ── Unified Import ────────────────────────────────────────────────────────────
+// phase: 'idle' | 'register-ready' | 'register-checked' | 'batch-ready' | 'batch-planned' | 'batch-done'
+let _uimpPhase = 'idle';
+
+function openImport() {
+  document.getElementById('unified-import-modal').classList.remove('hidden');
+  _uimpReset();
+}
+function closeImport() {
+  document.getElementById('unified-import-modal').classList.add('hidden');
+}
+function _uimpReset() {
+  _uimpPhase = 'idle';
+  window._uimpAllowErrors = false;
+  window._uimpProfileId = null;
+  _uimpBatchClear();
+  document.getElementById('uimp-file').value = '';
+  const st = document.getElementById('uimp-status');
+  st.style.display = 'none'; st.textContent = '';
+  document.getElementById('uimp-acct-row').style.display = 'none';
+  document.getElementById('uimp-acct-select').disabled = false;
+  _uimpCardOpts(false);
+  const btn = document.getElementById('uimp-btn');
+  btn.textContent = 'Detect'; btn.disabled = true;
+}
+function _uimpCardOpts(show) {
+  document.getElementById('uimp-card-opts').style.display = show ? 'flex' : 'none';
+  document.querySelector('#unified-import-modal .modal-box').classList.toggle('wide', show);
+  if (!show) document.getElementById('uimp-card-suggest').innerHTML = '';
+}
+// Account select values are "r:<id>" (cash register) or "c:<id>" (credit card).
+function _uimpTarget() {
+  const v = document.getElementById('uimp-acct-select').value;
+  if (!v) return null;
+  const [kind, id] = v.split(':');
+  return {kind, id};
+}
+async function _uimpFillAccounts(includeRegister) {
+  const [rRes, cRes] = await Promise.all([
+    includeRegister ? fetch('/api/register/accounts') : Promise.resolve(null),
+    fetch('/api/cards/accounts'),
+  ]);
+  const reg = rRes && rRes.ok ? await rRes.json() : [];
+  const cardAccts = cRes.ok ? (await cRes.json()).filter(a => !a.archived) : [];
+  const sel = document.getElementById('uimp-acct-select');
+  let html = '<option value="">— select account —</option>';
+  if (reg.length) html += '<optgroup label="Cash accounts">' + reg.map(a =>
+    `<option value="r:${a.id}"${a.id === cfCurrentId ? ' selected' : ''}>${escHtml(a.name)}</option>`).join('') + '</optgroup>';
+  html += '<optgroup label="Credit cards">' + cardAccts.map(a =>
+    `<option value="c:${a.id}">${escHtml(a.name)}</option>`).join('') + '<option value="c:new">+ New card account…</option></optgroup>';
+  sel.innerHTML = html;
+  if (!includeRegister && cardAccts.length === 1) sel.value = 'c:' + cardAccts[0].id;
+  return {reg, cardAccts};
+}
+// A structured problem from an import endpoint (no format, changed columns, reversed
+// sign, unreadable rows) is shown by static/importprofiles.js, which re-runs the check.
+async function _uimpProblem(d, retry) {
+  const target = _uimpTarget();
+  if (!target) return false;
+  window._uimpAllowErrors = false;
+  return ipProblem(d.detail, {
+    box: document.getElementById('uimp-status'), file: document.getElementById('uimp-file').files[0],
+    accountKind: ipKind(target), accountId: target.id,
+    retry: () => _uimpRecheck(),
+    allowErrors: async () => { window._uimpAllowErrors = true; await retry(); },
+  });
+}
+// How a card format reads charges (import_profile.card_sign_convention), as a sentence.
+function _uimpSignText(convention) {
+  return {
+    charges_negative: 'This file shows charges as negative amounts.',
+    charges_positive: 'This file shows charges as positive amounts; Flow stores them as negative.',
+    debit_credit_columns: 'This file has separate columns for charges and credits.',
+    direction_column: 'This file marks each amount as a charge or a credit in a separate column.',
+  }[convention] || `Charges are read as: ${String(convention || 'unknown').replace(/_/g, ' ')}.`;
+}
+// "Format: <name>" with Edit / Change, the sign check, and any rows the format can't read
+// (the import then waits for "Import the rest").
+function _uimpFormatLine(d) {
+  if (!d.profile) return '';
+  const sc = d.sign_check || {};
+  const color = sc.status === 'confirmed' ? 'var(--text-muted)' : '#b45309';
+  return `<div class="uimp-format">Format: <b>${escHtml(d.profile.name)}</b>
+      <button class="btn-sm" onclick="uimpEditFormat()">Edit</button>
+      <button class="btn-sm" onclick="uimpChangeFormat(this)">Change</button></div>
+    <div style="margin-top:4px;color:${color}">Sign ${escHtml(sc.status || '')}${sc.reason ? `: ${escHtml(sc.reason)}` : ''}.</div>`
+    + (d.error_count ? `<div style="margin-top:4px;color:var(--red)">${d.error_count} row${d.error_count === 1 ? '' : 's'} can't be read with this format:</div>`
+      + `<ul class="ip-errors">${(d.errors || []).slice(0, 20).map(e => `<li>Row ${e.line}: ${escHtml(e.message)}</li>`).join('')}</ul>`
+      + `<label class="ip-check" style="margin-top:4px"><input type="checkbox" id="uimp-allow-errors" onchange="uimpAllowErrorsChanged(this.checked)"> Import the rest (these rows are left out)</label>` : '');
+}
+function _uimpImportReady(d) { return !d.error_count || window._uimpAllowErrors; }
+function uimpAllowErrorsChanged(on) {
+  window._uimpAllowErrors = on;
+  const d = window._uimpCheck || {};
+  const btn = document.getElementById('uimp-btn');
+  if (_uimpPhase !== 'register-checked') return;
+  const wrongAccount = (d.other_account_match || d.other_card_match) && !window._uimpAllowOther;
+  const nothingNew = 'other_card_match' in d && !d.would_import;     // card checks only enable Import with rows
+  btn.disabled = !!wrongAccount || nothingNew || !_uimpImportReady(d);
+}
+function _uimpRecheck() {
+  _uimpPhase = 'register-ready';
+  document.getElementById('uimp-acct-select').disabled = false;
+  return _uimpRegisterCheck();
+}
+async function uimpEditFormat() {
+  const d = window._uimpCheck, t = _uimpTarget();
+  if (!d || !d.profile || !t) return;
+  await ipEditSaved(d.profile.id, {file: document.getElementById('uimp-file').files[0],
+    account: {kind: ipKind(t), id: t.id}, onSaved: () => _uimpRecheck()});
+}
+async function uimpChangeFormat(btn) {
+  const d = window._uimpCheck, t = _uimpTarget();
+  if (!d || !t) return;
+  const kind = ipKind(t);
+  const list = (await ipJson(`/api/import-profiles?kind=${kind}`).catch(() => []))
+    .filter(p => p.links.some(l => l.kind === kind && l.account_id === Number(t.id)));
+  btn.outerHTML = `<select class="ip-linksel" onchange="uimpUseFormat(this.value)">${list.map(p =>
+    `<option value="${p.id}"${p.id === d.profile.id ? ' selected' : ''}>${escHtml(p.name)}</option>`).join('')}</select>
+    <button class="btn-sm" onclick="ipOpenList({onClose: () => _uimpRecheck()})">Manage formats…</button>`;
+}
+function uimpUseFormat(id) { window._uimpProfileId = Number(id); _uimpRecheck(); }
+function _uimpFormatQuery(qs) { if (window._uimpProfileId) qs.set('profile_id', window._uimpProfileId); return qs; }
+function uimpFileChanged() {
+  _uimpBatchClear();
+  window._uimpProfileId = null;
+  const files = document.getElementById('uimp-file').files;
+  const hasFile = !!files[0];
+  const st = document.getElementById('uimp-status');
+  st.style.display = 'none'; st.textContent = '';
+  document.getElementById('uimp-acct-row').style.display = 'none';
+  document.getElementById('uimp-acct-select').disabled = false;
+  _uimpCardOpts(false);
+  const btn = document.getElementById('uimp-btn');
+  btn.textContent = files.length > 1 ? `Check ${files.length} files` : 'Detect'; btn.disabled = !hasFile;
+  _uimpPhase = files.length > 1 ? 'batch-ready' : 'idle';
+}
+async function uimpAcctChanged() {
+  const sel = document.getElementById('uimp-acct-select');
+  if (sel.value === 'c:new') {
+    const name = (prompt('Name for the new card account (e.g. "Travel rewards card")') || '').trim();
+    if (!name) { sel.value = ''; return; }
+    const res = await fetch('/api/cards/accounts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(d.detail || 'Could not create card'); sel.value = ''; return; }
+    await _uimpFillAccounts(document.querySelector('#uimp-acct-select optgroup[label="Cash accounts"]') !== null);
+    sel.value = 'c:' + d.id;
+  }
+  const t = _uimpTarget();
+  window._uimpProfileId = null;
+  _uimpCardOpts(!!t && t.kind === 'c');
+  // If user changes account after check, reset back to ready
+  if (_uimpPhase === 'register-checked') {
+    _uimpPhase = 'register-ready';
+    document.getElementById('uimp-btn').textContent = 'Check →';
+    const st = document.getElementById('uimp-status');
+    st.style.color = 'var(--text-muted)';
+    st.textContent = 'Account changed — click Check to preview again.';
+  }
+}
+async function uimpAction() {
+  if (_uimpPhase === 'idle') await _uimpDetect();
+  else if (_uimpPhase === 'register-ready') await _uimpRegisterCheck();
+  else if (_uimpPhase === 'register-checked') await _uimpRegisterImport();
+  else if (_uimpPhase === 'batch-ready') await _uimpBatchPlan();
+  else if (_uimpPhase === 'batch-planned') await _uimpBatchImport();
+  else if (_uimpPhase === 'batch-done') _uimpBatchFinish();
+  else if (_uimpPhase === 'done') closeImport();
+}
+async function _uimpDetect() {
+  const f = document.getElementById('uimp-file').files[0];
+  if (!f) return;
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  btn.disabled = true; btn.textContent = 'Detecting…';
+  st.style.display = 'block'; st.style.color = 'var(--text-muted)'; st.textContent = 'Detecting file format…';
+  const fd = new FormData(); fd.append('file', f);
+  const res = await fetch('/api/import/detect', {method:'POST', body: fd});
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + (d.detail || 'Could not detect file format');
+    btn.textContent = 'Detect'; btn.disabled = false;
+    return;
+  }
+  const det = await res.json();
+  if (det.type === 'new' || det.type === 'changed') {
+    st.style.color = 'var(--text)';
+    st.innerHTML = det.type === 'new'
+      ? `Flow hasn't seen this file layout yet (${det.rows} row${det.rows !== 1 ? 's' : ''} found). Pick its account, then check and save the suggested format.`
+      : `This file's columns have changed since the format “${escHtml(det.profile.name)}” was saved. Pick its account to update the format.`;
+    await _uimpFillAccounts(true);
+    document.getElementById('uimp-acct-row').style.display = 'block';
+    if (det.accounts && det.accounts.length === 1) document.getElementById('uimp-acct-select').value = det.accounts[0];
+    btn.textContent = 'Check →'; btn.disabled = false;
+    _uimpPhase = 'register-ready';
+    uimpAcctChanged();
+    return;
+  }
+  if (det.type === 'register') {
+    const fmt = det.format === 'bank' ? 'Bank' : 'Ledger';
+    st.style.color = 'var(--green)';
+    st.innerHTML = `✓ ${fmt} file, read with the format “${escHtml(det.issuer_label)}” &mdash; ${det.rows} row${det.rows !== 1 ? 's' : ''}`
+      + (det.format === 'bank' ? '<br><span style="color:var(--text-muted)">A bank-statement layout can go to a cash account or a card: pick the account.</span>' : '');
+    // Populate account dropdown (fetch fresh in case user is on Dashboard)
+    await _uimpFillAccounts(true);
+    document.getElementById('uimp-acct-row').style.display = 'block';
+    btn.textContent = 'Check →'; btn.disabled = false;
+    _uimpPhase = 'register-ready';
+    uimpAcctChanged();
+  } else if (det.type === 'card') {
+    st.style.color = 'var(--green)';
+    st.innerHTML = `✓ Card statement, read with the format “${escHtml(det.issuer_label)}” &mdash; ${det.rows} row${det.rows !== 1 ? 's' : ''}`;
+    await _uimpFillAccounts(false);
+    document.getElementById('uimp-acct-row').style.display = 'block';
+    _uimpCardOpts(true);
+    btn.textContent = 'Check →'; btn.disabled = false;
+    _uimpPhase = 'register-ready';
+  }
+}
+async function _uimpRegisterCheck() {
+  const target = _uimpTarget();
+  if (!target || target.id === 'new') { alert('Please select an account.'); return; }
+  if (target.kind === 'c') return _uimpCardCheck(target.id);
+  const f = document.getElementById('uimp-file').files[0];
+  const acctId = target.id;
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  const fd = new FormData(); fd.append('file', f);
+  const cq = _uimpFormatQuery(new URLSearchParams()).toString();
+  const res = await fetch(`/api/register/${acctId}/import/check` + (cq ? '?' + cq : ''), {method:'POST', body: fd});
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({detail:'Could not read file'}));
+    if (await _uimpProblem(d, _uimpRegisterImport)) { btn.textContent = 'Check →'; btn.disabled = true; return; }
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + (d.detail || 'Could not read file');
+    btn.textContent = 'Check →'; btn.disabled = false;
+    return;
+  }
+  {
+    const d = await res.json();
+    st.style.color = 'var(--green)';
+    if (d.format === 'ledger') {
+      st.innerHTML = `✓ Ledger: ${d.would_import} transaction${d.would_import !== 1 ? 's' : ''} to add`
+        + (d.would_skip ? `, ${d.would_skip} duplicate${d.would_skip !== 1 ? 's' : ''} skipped` : '') + '.';
+    } else {
+      const wrong = d.other_account_match;
+      st.innerHTML = (wrong ? _uimpWrongAccountBox(wrong.message, 'r', wrong.account_id, wrong.account, 'account') : '')
+        + `✓ Bank: ${d.would_import} new transaction${d.would_import !== 1 ? 's' : ''}. `
+        + `Auto-matched: ${d.would_auto_match}. Unmatched: ${d.would_unmatched}.`
+        + (d.would_skip ? `<br><span style="color:var(--text-muted)">${d.would_skip} already-imported row${d.would_skip !== 1 ? 's' : ''} skipped.</span>` : '');
+    }
+    st.innerHTML += _uimpFormatLine(d);
+    window._uimpAllowOther = false;
+    window._uimpAllowErrors = false;
+    window._uimpCheck = d;
+    const blocked = !!d.other_account_match;
+    document.getElementById('uimp-acct-select').disabled = true;
+    btn.textContent = blocked ? 'Confirm the account first' : 'Import'; btn.disabled = blocked || !_uimpImportReady(d);
+    _uimpPhase = 'register-checked';
+  }
+}
+async function _uimpCardCheck(acctId) {
+  const f = document.getElementById('uimp-file').files[0];
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  st.style.display = 'block'; st.style.color = 'var(--text-muted)'; st.textContent = 'Reading statement…';
+  const fd = new FormData(); fd.append('file', f);
+  const cq = _uimpFormatQuery(new URLSearchParams()).toString();
+  const res = await fetch(`/api/cards/${acctId}/import/check` + (cq ? '?' + cq : ''), {method: 'POST', body: fd});
+  const d = await res.json().catch(() => ({detail: 'Could not read file'}));
+  if (!res.ok && await _uimpProblem(d, _uimpRegisterImport)) { btn.textContent = 'Check →'; btn.disabled = true; return; }
+  if (!res.ok) {
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + (d.detail || 'Could not read file');
+    btn.textContent = 'Check →'; btn.disabled = false;
+    return;
+  }
+  const n = (x, w) => `${x} ${w}${x === 1 ? '' : 's'}`;
+  st.style.color = 'var(--text)';
+  const wrong = d.other_card_match;
+  window._uimpAllowOther = false;
+  st.innerHTML = (wrong ? _uimpWrongAccountBox(wrong.message, 'c', wrong.card_account_id, wrong.card, 'card') : '') + `<div><strong>Card statement</strong>${d.statement_start ? ` · statement ${cfFmtDate(d.statement_start)} → ${cfFmtDate(d.statement_end)}` : ''}</div>
+    <div style="margin-top:4px">${n(d.would_import, 'new transaction')} to import${d.would_skip ? `, ${d.would_skip} already on file` : ''}${d.pending_dropped ? `, ${d.pending_dropped} pending skipped` : ''}.</div>
+    ${_uimpFormatLine(d)}<div style="margin-top:4px;color:var(--text-muted)">${escHtml(_uimpSignText(d.sign_convention))} Check that purchases show as negative below.</div>
+    <div style="margin-top:4px;color:${d.ai_problem ? '#b45309' : 'var(--text-muted)'}">${d.ai_problem ? `AI is paused: ${escHtml(d.ai_problem.message)} Unrecognised merchants will be marked for review.` : d.ai_enabled ? (d.would_send_to_ai ? `${n(d.would_send_to_ai, 'unrecognised merchant name')} will be sent to the AI after import (names only, sanitized).` : 'No merchant names need the AI.') : 'AI categorization is off; unrecognised merchants will be marked for review.'}</div>
+    <table class="uimp-preview"><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th>Type</th><th>Category</th></tr></thead><tbody>
+    ${d.preview.map(r => `<tr class="${r.already_on_file ? 'dupe' : ''}"><td>${cfFmtDate(r.date)}</td><td>${escHtml(r.description)}</td>
+      <td class="num"><span class="${r.amount < 0 ? 'amount-debit' : 'amount-credit'}">${fmtFull(r.amount)}</span></td>
+      <td>${escHtml(r.txn_type.replace(/_/g, ' '))}</td><td>${escHtml(r.category)}</td></tr>`).join('')}</tbody></table>`;
+  const sug = [];
+  if (d.suggested_cardholders && d.suggested_cardholders.length)
+    sug.push(`<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="uimp-save-names" checked> Save cardholder name${d.suggested_cardholders.length === 1 ? '' : 's'} from this file to the card (used to redact names before any AI call)</label>`);
+  if (d.new_card_numbers && d.new_card_numbers.length)
+    sug.push(`<div style="color:var(--text-muted)">New card number${d.new_card_numbers.length === 1 ? '' : 's'} ending ${d.new_card_numbers.map(escHtml).join(', ')} will be added to this card.</div>`);
+  document.getElementById('uimp-card-suggest').innerHTML = sug.join('');
+  window._uimpCardSuggest = d;
+  window._uimpCheck = d;
+  window._uimpAllowErrors = false;
+  document.getElementById('uimp-acct-select').disabled = true;
+  btn.textContent = d.would_import ? (wrong ? 'Confirm the card first' : 'Import') : 'Nothing new to import';
+  btn.disabled = !d.would_import || !!wrong || !_uimpImportReady(d);
+  _uimpPhase = 'register-checked';
+}
+// Wrong-account warning (cards and cash accounts): re-check against the suggested account, or confirm this one.
+function _uimpWrongAccountBox(message, kind, id, name, noun) {
+  return `<div class="uimp-wrong-card">
+      <strong>⚠ Wrong ${noun}?</strong> ${escHtml(message)}
+      <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn-sm btn-primary" onclick="uimpSwitchAccount('${kind}', ${id})">Switch to ${escHtml(name)}</button>
+        <button class="btn-sm" onclick="uimpAllowOtherAccount('${noun}')">It's the right ${noun}</button>
+      </div></div>`;
+}
+function uimpSwitchAccount(kind, id) {
+  const sel = document.getElementById('uimp-acct-select');
+  sel.disabled = false;
+  sel.value = kind + ':' + id;
+  _uimpPhase = 'register-ready';
+  _uimpRegisterCheck();
+}
+function uimpAllowOtherAccount(noun) {
+  window._uimpAllowOther = true;
+  const box = document.querySelector('.uimp-wrong-card');
+  if (box) box.innerHTML = `<strong>Confirmed.</strong> Importing into the ${noun} you picked; rows already in it are still skipped.`;
+  const d = window._uimpCheck || {};
+  const btn = document.getElementById('uimp-btn');
+  btn.textContent = 'Import'; btn.disabled = !d.would_import || !_uimpImportReady(d);
+}
+async function _uimpCardImport(acctId) {
+  const f = document.getElementById('uimp-file').files[0];
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  btn.disabled = true; btn.textContent = 'Importing…';
+  const sugg = window._uimpCardSuggest || {};
+  const patch = {};
+  const names = document.getElementById('uimp-save-names');
+  if (names && names.checked) {
+    const acct = await fetch('/api/cards/accounts').then(r => r.json()).then(l => l.find(a => String(a.id) === String(acctId))).catch(() => null);
+    const existing = acct && acct.cardholder_names ? acct.cardholder_names.split('\n') : [];
+    patch.cardholder_names = [...new Set([...existing, ...sugg.suggested_cardholders].map(x => x.trim()).filter(Boolean))].join('\n');
+  }
+  if (Object.keys(patch).length) {
+    await fetch(`/api/cards/accounts/${acctId}`, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(patch)});
+  }
+  const fd = new FormData(); fd.append('file', f);
+  const qs = new URLSearchParams();
+  if (window._uimpAllowOther) qs.set('allow_other_card', 'true');
+  if (window._uimpAllowErrors) qs.set('allow_errors', 'true');
+  _uimpFormatQuery(qs);
+  const res = await fetch(`/api/cards/${acctId}/import` + (qs.toString() ? '?' + qs : ''), {method: 'POST', body: fd});
+  const d = await res.json().catch(() => ({detail: 'Import failed'}));
+  if (res.ok) {
+    closeImport();
+    cdAfterImport(acctId, d);
+  } else if (await _uimpProblem(d, () => _uimpCardImport(acctId))) {
+    btn.textContent = 'Import'; btn.disabled = true;
+  } else {
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + (d.detail || 'Import failed');
+    document.getElementById('uimp-acct-select').disabled = false;
+    btn.textContent = 'Check →'; btn.disabled = false;
+    _uimpPhase = 'register-ready';
+  }
+}
+async function _uimpRegisterImport() {
+  const target = _uimpTarget();
+  if (target && target.kind === 'c') return _uimpCardImport(target.id);
+  const f = document.getElementById('uimp-file').files[0];
+  const acctId = target ? target.id : '';
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  btn.disabled = true; btn.textContent = 'Importing…';
+  const fd = new FormData(); fd.append('file', f);
+  const qs = new URLSearchParams();
+  if (window._uimpAllowOther) qs.set('allow_other_account', 'true');
+  if (window._uimpAllowErrors) qs.set('allow_errors', 'true');
+  _uimpFormatQuery(qs);
+  const res = await fetch(`/api/register/${acctId}/import` + (qs.toString() ? '?' + qs : ''), {method:'POST', body: fd});
+  if (res.ok) {
+    const d = await res.json();
+    closeImport();
+    showSection('cashflow');
+    if (parseInt(acctId) !== cfCurrentId) {
+      await cfLoadAccounts();
+      cfSelectAccount(String(acctId));
+      document.getElementById('cf-account-select').value = acctId;
+    } else {
+      await cfLoadTxns();
+    }
+    if (d.format === 'bank' && (d.unmatched > 0 || d.auto_matched > 0) && !cfReconciling) {
+      toggleReconcile();
+    }
+  } else {
+    const d = await res.json().catch(() => ({detail:'Import failed'}));
+    if (await _uimpProblem(d, _uimpRegisterImport)) { btn.textContent = 'Import'; btn.disabled = true; return; }
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + (d.detail || 'Import failed');
+    document.getElementById('uimp-acct-select').disabled = false;
+    btn.textContent = 'Import'; btn.disabled = false;
+    _uimpPhase = 'register-ready';
+  }
+}
+
+// ── Bulk import ──────────────────────────────────────────────────────────────
+// Several files: /api/import/batch/plan suggests each file's account (only when
+// the evidence points one way; see import_batch.py), the user picks the rest,
+// then each file goes to the normal single-file import endpoint, which checks
+// it again. A file the user picked by hand is sent with allow_other_*: the plan
+// already showed them what the data says.
+let _uimpB = null;   // {files, plan, picks: {index: key|'skip'}, manual: Set, auto: {index: key}, results: {}}
+
+function _uimpBatchClear() {
+  _uimpB = null;
+  const box = document.getElementById('uimp-batch');
+  box.style.display = 'none'; box.innerHTML = '';
+}
+function _uimpBatchFiles() { return Array.from(document.getElementById('uimp-file').files); }
+
+async function _uimpBatchPlan() {
+  const files = _uimpB ? _uimpB.files : _uimpBatchFiles();
+  if (!_uimpB) _uimpB = {files, plan: null, picks: {}, manual: new Set(), auto: {}, results: {}};
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  st.style.display = 'block'; st.style.color = 'var(--text-muted)'; st.textContent = `Checking ${files.length} files against your accounts…`;
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+  const pinned = {};
+  for (const i of _uimpB.manual) if (_uimpB.picks[i] && _uimpB.picks[i] !== 'skip') pinned[i] = _uimpB.picks[i];
+  fd.append('pinned', JSON.stringify(pinned));
+  const res = await fetch('/api/import/batch/plan', {method: 'POST', body: fd});
+  const d = await res.json().catch(() => ({detail: 'Could not check the files'}));
+  if (!res.ok) {
+    st.style.color = 'var(--red)'; st.textContent = '✗ ' + (d.detail || 'Could not check the files');
+    btn.textContent = `Check ${files.length} files`; btn.disabled = false;
+    _uimpPhase = 'batch-ready';
+    return;
+  }
+  _uimpB.plan = d;
+  for (const f of d.files) {
+    if (_uimpB.manual.has(f.index)) continue;
+    _uimpB.auto[f.index] = f.sure ? f.account : null;  // what the data said, kept once the user overrides it
+    _uimpB.picks[f.index] = f.error ? 'skip' : (f.sure && f.account) || '';
+  }
+  document.querySelector('#unified-import-modal .modal-box').classList.add('wide');
+  _uimpPhase = 'batch-planned';
+  _uimpBatchRender();
+}
+
+function _uimpBatchLabel(f) {
+  const n = (x, w) => `${x} ${w}${x === 1 ? '' : 's'}`;
+  const dates = f.date_min ? ` · ${cfFmtDate(f.date_min)} → ${cfFmtDate(f.date_max)}` : '';
+  const fmt = f.profiles && f.profiles.length ? ` · format “${escHtml(f.profiles.map(p => p.name).join('” / “'))}”` : '';
+  if (f.type === 'card') return `Card statement${fmt} · ${n(f.rows, 'row')}${dates}`;
+  if (f.type === 'register') return `${f.format === 'bank' ? 'Bank statement' : 'Ledger'}${fmt} · ${n(f.rows, 'row')}${dates}`;
+  return '';
+}
+// Account choices a file can go to: card statements to cards, ledgers to cash
+// accounts, bank-layout exports to either (the same layout serves both).
+function _uimpBatchOptions(f) {
+  const pick = _uimpB.picks[f.index] || '';
+  const accts = _uimpB.plan.accounts.filter(a => f.type === 'card' ? a.key[0] === 'c'
+    : f.format === 'ledger' ? a.key[0] === 'r' : true);
+  const opt = (v, label) => `<option value="${v}"${v === pick ? ' selected' : ''}>${label}</option>`;
+  const group = (kind, label) => {
+    const list = accts.filter(a => a.key[0] === kind);
+    if (!list.length && !(kind === 'c' && f.format !== 'ledger')) return '';
+    return `<optgroup label="${label}">` + list.map(a => opt(a.key, escHtml(a.name))).join('')
+      + (kind === 'c' ? opt('c:new', '+ New card account…') : '') + '</optgroup>';
+  };
+  return opt('', '— pick an account —') + opt('skip', 'Skip this file') + group('r', 'Cash accounts') + group('c', 'Credit cards');
+}
+
+// A file no saved format reads (or whose columns changed): set up its format, then plan again.
+async function uimpBatchSetup(index) {
+  const f = _uimpB.plan.files.find(x => x.index === index), file = _uimpB.files[index];
+  const again = async () => { _uimpPhase = 'batch-ready'; await _uimpBatchPlan(); };
+  if (f.setup.mode === 'changed')
+    await ipEditSaved(f.setup.profile.id, {file, spec: f.setup.draft, diff: f.setup.diff, onSaved: again});
+  else await ipOpenEditor({file, kind: f.setup.kind, draft: f.setup.draft, onSaved: again});
+}
+function _uimpBatchRender() {
+  const box = document.getElementById('uimp-batch');
+  const st = document.getElementById('uimp-status');
+  const B = _uimpB, files = B.plan.files;
+  const done = _uimpPhase === 'batch-done' || _uimpPhase === 'batch-importing';
+  box.style.display = 'block';
+  box.innerHTML = files.map(f => {
+    const pick = B.picks[f.index] || '';
+    const res = B.results[f.index];
+    const manual = B.manual.has(f.index);
+    // A guessed sign with nothing on file to confirm it can't be fixed here: the
+    // single-file import shows the preview and lets the user set the sign.
+    const signLocked = !f.error && f.sign_guessed && !f.sure;
+    let control;
+    if (f.error) control = '<span style="color:var(--red)">Skipped</span>';
+    else if (signLocked) control = '<span style="color:#b45309">Skipped</span>';
+    else control = `<select id="uimp-b-${f.index}" ${done ? 'disabled' : ''} onchange="uimpBatchPick(${f.index}, this)">${_uimpBatchOptions(f)}</select>`;
+    let why = '';
+    if (f.error) why = `<div class="why" style="color:var(--red)">✗ ${escHtml(f.error)}`
+      + (f.setup && !done ? ` <button class="btn-sm" onclick="uimpBatchSetup(${f.index})">${f.setup.mode === 'new' ? 'Set up format…' : 'Update format…'}</button>` : '') + '</div>';
+    else if (signLocked) why = `<div class="why unsure">⚠ ${(f.reasons || []).map(escHtml).join(' ')} Nothing on file confirms which way its format reads money in and out: import it on its own to check.</div>`;
+    else if (manual) {
+      const auto = B.auto[f.index];
+      const differs = auto && pick !== auto && pick !== 'skip';
+      why = `<div class="why">${pick === 'skip' ? 'You chose to skip this file.' : 'You picked this account.'}`
+        + (differs ? ` <span class="warn">Its transactions pointed to ${escHtml(_uimpBatchName(auto))}.</span>` : '') + '</div>';
+    } else {
+      why = f.sure
+        ? `<div class="why sure">✓ ${(f.reasons || []).map(escHtml).join(' ')}</div>`
+        : `<div class="why unsure">⚠ Pick the account: ${(f.reasons || []).map(escHtml).join(' ')}`
+          + (f.hint ? ` <button class="btn-sm" onclick="uimpBatchUseHint(${f.index})">Use ${escHtml(_uimpBatchName(f.hint))}</button>` : '') + '</div>';
+    }
+    const warns = (f.warnings || []).map(w => `<div class="warn">⚠ ${escHtml(w)}</div>`).join('');
+    const result = res ? `<div class="result" style="color:${res.ok ? 'var(--green)' : 'var(--red)'}">${res.ok ? '✓ ' : '✗ '}${escHtml(res.text)}</div>` : '';
+    const needs = !done && !f.error && !signLocked && !pick;
+    return `<div class="uimp-batch-row${needs ? ' needs' : ''}"><div class="head"><span class="name">${escHtml(f.filename)}</span>${control}</div>
+      <div style="color:var(--text-muted);margin-top:2px">${_uimpBatchLabel(f)}</div>${why}${warns}${result}</div>`;
+  }).join('');
+  if (done) return;
+  const todo = _uimpBatchQueue();
+  const open = files.filter(f => !f.error && !(f.sign_guessed && !f.sure) && !B.picks[f.index]).length;
+  const sure = files.filter(f => f.sure && !B.manual.has(f.index)).length;
+  st.style.display = 'block';
+  st.style.color = open ? '#b45309' : 'var(--text-muted)';
+  st.textContent = open
+    ? `${open} file${open === 1 ? '' : 's'} need${open === 1 ? 's' : ''} an account before anything is imported.`
+    : `${sure} file${sure === 1 ? '' : 's'} matched automatically. Rows already on file are skipped as usual.`;
+  const btn = document.getElementById('uimp-btn');
+  btn.textContent = open ? 'Pick the remaining accounts' : todo.length ? `Import ${todo.length} file${todo.length === 1 ? '' : 's'}` : 'Nothing to import';
+  btn.disabled = !!open || !todo.length;
+}
+function _uimpBatchName(key) {
+  const a = _uimpB.plan.accounts.find(x => x.key === key);
+  return a ? a.name : key;
+}
+// Files to send, balance sheets first (they don't touch the register), then oldest
+// first so each file's dedup sees the one before it.
+function _uimpBatchQueue() {
+  const B = _uimpB;
+  return B.plan.files
+    .filter(f => !f.error && !(f.sign_guessed && !f.sure) && B.picks[f.index] && B.picks[f.index] !== 'skip')
+    .sort((a, b) => String(a.date_min || '').localeCompare(String(b.date_min || '')));
+}
+async function uimpBatchPick(index, sel) {
+  let v = sel.value;
+  if (v === 'c:new') {
+    const name = (prompt('Name for the new card account (e.g. "Travel rewards card")') || '').trim();
+    if (!name) { sel.value = _uimpB.picks[index] || ''; return; }
+    const res = await fetch('/api/cards/accounts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(d.detail || 'Could not create card'); sel.value = _uimpB.picks[index] || ''; return; }
+    v = 'c:' + d.id;
+  }
+  _uimpB.picks[index] = v;
+  if (v) _uimpB.manual.add(index); else _uimpB.manual.delete(index);
+  // A pick is history for the other files: check again so files that overlap it can match.
+  const waiting = _uimpB.plan.files.some(f => !f.error && !f.sure && !_uimpB.manual.has(f.index));
+  if (waiting || v.startsWith('c:') && !_uimpB.plan.accounts.some(a => a.key === v)) await _uimpBatchPlan();
+  else _uimpBatchRender();
+}
+function uimpBatchUseHint(index) {
+  const f = _uimpB.plan.files.find(x => x.index === index);
+  const sel = document.getElementById('uimp-b-' + index);
+  if (sel) { sel.value = f.hint; uimpBatchPick(index, sel); }
+}
+
+async function _uimpBatchImport() {
+  const B = _uimpB, queue = _uimpBatchQueue();
+  const btn = document.getElementById('uimp-btn');
+  const st = document.getElementById('uimp-status');
+  _uimpPhase = 'batch-importing';
+  btn.disabled = true;
+  let ok = 0, failed = 0;
+  B.touched = {cash: new Set(), cards: new Set()};
+  for (const [n, f] of queue.entries()) {
+    btn.textContent = `Importing ${n + 1} of ${queue.length}…`;
+    _uimpBatchRender();
+    const file = B.files[f.index];
+    const pick = B.picks[f.index];
+    const manual = B.manual.has(f.index);
+    const fd = new FormData(); fd.append('file', file);
+    let url;
+    if (pick[0] === 'c') url = `/api/cards/${pick.slice(2)}/import` + (manual ? '?allow_other_card=true' : '');
+    else url = `/api/register/${pick.slice(2)}/import` + (manual ? '?allow_other_account=true' : '');
+    let res, d;
+    try {
+      res = await fetch(url, {method: 'POST', body: fd});
+      d = await res.json().catch(() => ({}));
+    } catch (e) {
+      res = {ok: false}; d = {detail: 'Network error'};
+    }
+    if (res.ok) {
+      ok++;
+      let text;
+      if (pick[0] === 'c') {
+        text = `${d.imported} imported into ${_uimpBatchName(pick)}${d.skipped ? `, ${d.skipped} already on file` : ''}.`
+          + (d.new_card_numbers && d.new_card_numbers.length ? ` Card number ending ${d.new_card_numbers.join(', ')} added to it.` : '');
+        B.touched.cards.add(pick.slice(2));
+      }
+      else { text = `${d.imported} imported into ${_uimpBatchName(pick)}${d.skipped ? `, ${d.skipped} already on file` : ''}.`; B.touched.cash.add(pick.slice(2)); }
+      B.results[f.index] = {ok: true, text};
+    } else {
+      failed++;
+      const why = typeof d.detail === 'string' ? d.detail : (d.detail && d.detail.message) || 'Import failed';
+      B.results[f.index] = {ok: false, text: why + (res.status === 409 || (d.detail && d.detail.code) ? ' Nothing from this file was imported; import it on its own to decide.' : '')};
+    }
+  }
+  _uimpPhase = 'batch-done';
+  _uimpBatchRender();
+  st.style.display = 'block';
+  st.style.color = failed ? '#b45309' : 'var(--green)';
+  st.textContent = `${ok} file${ok === 1 ? '' : 's'} imported` + (failed ? `, ${failed} not imported (see below).` : '.');
+  btn.textContent = 'Done'; btn.disabled = false;
+}
+async function _uimpBatchFinish() {
+  const t = _uimpB && _uimpB.touched;
+  closeImport();
+  loadAll();
+  if (!t) return;
+  if (t.cards.size) {
+    cdReset();
+    if (t.cash.size === 0) { cdAfterImport(t.cards.size === 1 ? [...t.cards][0] : ''); return; }
+  }
+  if (t.cash.size) {
+    showSection('cashflow');
+    await cfLoadAccounts();
+    if (t.cash.size === 1) {
+      const id = [...t.cash][0];
+      cfSelectAccount(id);
+      document.getElementById('cf-account-select').value = id;
+    } else {
+      await cfLoadTxns();
+    }
+  }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Account panel ─────────────────────────────────────────────────────────────
+function toggleAcctPanel() {
+  const b = document.getElementById('acct-body');
+  const t = document.getElementById('acct-toggle');
+  b.classList.toggle('open');
+  t.textContent = b.classList.contains('open') ? '▾ Manage Accounts' : '▸ Manage Accounts';
+}
+async function patchIgnore(id, ignored) {
+  await fetch('/api/accounts/' + id, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ignored})
+  });
+  loadAll();
+}
+function renderAccounts() {
+  const el = document.getElementById('acct-list');
+  let html = '';
+
+  if (!accounts.length && !cfAccounts.length) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No accounts yet. Add a balance-sheet account (+ New balance account) or import a bank file to get started.</div>';
+    return;
+  }
+
+  html += accounts.map(a => `
+    <div class="acct-row${a.ignored || a.archived ? ' ignored' : ''}">
+      <span class="acct-name">${escHtml(a.name)}${(a.last4 || []).map(n => ` <span class="acct-num">…${escHtml(n)}</span>`).join('')}${a.archived ? ' <span style="font-size:10px;color:var(--text-muted)">archived</span>' : ''}</span>
+      <span class="badge badge-${a.account_type}">${a.account_type}</span>
+      <button class="ignore-btn${a.ignored ? ' active' : ''}" onclick="patchIgnore(${a.id}, ${!a.ignored})">${a.ignored ? 'ignored' : 'ignore'}</button>
+      <button onclick="balOpenAccount(${a.id})" style="font-size:11px;padding:3px 8px">Edit</button>
+    </div>`).join('');
+
+  if (cfAccounts.length) {
+    if (accounts.length) html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+    html += cfAccounts.map(a => `
+      <div class="acct-row">
+        <span class="acct-name">${escHtml(a.name)}</span>
+        <span class="badge badge-register">register</span>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:auto">${fmtFull(a.current_balance)}</span>
+        <button onclick="openRegisterAccount(${a.id})" style="font-size:11px;padding:3px 8px">Open →</button>
+      </div>`).join('');
+  }
+
+  el.innerHTML = html;
+}
+
+// ── Chart helpers ─────────────────────────────────────────────────────────────
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+function baseOpts(yFmt) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: {
+      callbacks: { label: ctx => ' ' + (yFmt ? yFmt(ctx.parsed.y) : fmt(ctx.parsed.y)) }
+    }},
+    scales: {
+      x: { grid: { color: GRID }, ticks: { color: TICK, maxRotation: 0 } },
+      y: { grid: { color: GRID }, ticks: { color: TICK, callback: v => yFmt ? yFmt(v) : fmt(v) } }
+    }
+  };
+}
+
+// ── Load everything ───────────────────────────────────────────────────────────
+async function loadAll() {
+  const [sumRes, tsRes, acctRes, regRes, regTsRes] = await Promise.all([
+    fetch('/api/data/summary'),
+    fetch('/api/data/timeseries'),
+    fetch('/api/accounts'),
+    fetch('/api/register/accounts'),
+    fetch('/api/register/accounts/timeseries'),
+  ]);
+  if (sumRes.status === 401 || tsRes.status === 401) {
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-overlay').classList.remove('hidden');
+    return;
+  }
+  const sum  = await sumRes.json();
+  tsData     = await tsRes.json();
+  accounts   = await acctRes.json();
+  cfAccounts = regRes.ok ? await regRes.json() : [];
+  regTsData  = regTsRes.ok ? await regTsRes.json() : {periods: [], accounts: []};
+
+  renderCards(sum);
+  renderAccounts();
+  if (tsData.periods.length > 0 || regTsData.periods.length > 0) renderAllCharts();
+}
+
+// ── Metric cards ──────────────────────────────────────────────────────────────
+function setCard(valId, deltaId, value, delta, invertGood) {
+  document.getElementById(valId).textContent = fmt(value);
+  const d = document.getElementById(deltaId);
+  if (delta !== null && delta !== undefined) {
+    d.textContent = deltaArrow(delta, invertGood);
+    d.className = 'card-delta ' + deltaClass(delta, invertGood);
+  } else {
+    d.textContent = '';
+  }
+}
+function renderCards(s) {
+  // Add register account balances to total assets / net worth
+  const regTotal = cfAccounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
+  const totalAssets = s.total_assets + regTotal;
+  const netWorth = s.net_worth + regTotal;
+
+  setCard('c-nw', 'c-nw-d', netWorth, s.net_worth_mom_delta, false);
+  setCard('c-assets', 'c-assets-d', totalAssets, null, false);
+  setCard('c-liab', 'c-liab-d', Math.abs(s.total_liabilities), null, false);
+  const carried = s.carried_accounts || [];
+  const cEl = document.getElementById('c-nw-carried');
+  cEl.textContent = carried.length ? `${carried.length} account${carried.length === 1 ? '' : 's'} carried from an earlier month` : '';
+  cEl.title = carried.join(', ');
+  if (s.largest_asset) {
+    document.getElementById('c-top-label').textContent = s.largest_asset.name;
+    setCard('c-top', 'c-top-d', s.largest_asset.value, s.largest_asset.mom_delta, false);
+  }
+}
+
+// ── Derived series ────────────────────────────────────────────────────────────
+// Build YYYY-MM → value map from a set of periods+values (last value wins per month).
+function _monthMap(values, periods) {
+  const m = {};
+  periods.forEach((p, i) => { m[p.slice(0, 7)] = values[i]; });
+  return m;
+}
+// Forward-fill values for each month in targetMonths using a YYYY-MM value map.
+function _reindexByMonth(byMonth, targetMonths) {
+  let last = null;
+  return targetMonths.map(ym => { if (ym in byMonth) last = byMonth[ym]; return last; });
+}
+
+function deriveSeries() {
+  const accts     = (tsData && tsData.accounts) ? tsData.accounts : [];
+  const tsPeriods = (tsData && tsData.periods)  ? tsData.periods  : [];
+
+  // Collapse both sources to one representative period per calendar month.
+  // Within a month, prefer the regular-account period date (for stable labels);
+  // fall back to the register period if no regular period exists that month.
+  const tsMonths  = {};
+  tsPeriods.forEach(p => { const ym = p.slice(0,7); if (!tsMonths[ym] || p > tsMonths[ym]) tsMonths[ym] = p; });
+  const regMonths = {};
+  regTsData.periods.forEach(p => { const ym = p.slice(0,7); if (!regMonths[ym] || p > regMonths[ym]) regMonths[ym] = p; });
+
+  const allMonths = (() => {
+    const combined = [...new Set([...Object.keys(tsMonths), ...Object.keys(regMonths)])].sort();
+    // If balance-sheet data exists, suppress register-only months that predate it —
+    // mixing ledger history with no balance-sheet data produces a misleading jump.
+    const tsStart  = Object.keys(tsMonths).sort()[0];
+    const todayYM  = todayIso().slice(0, 7);
+    const clipped  = tsStart ? combined.filter(ym => ym >= tsStart) : combined;
+    return clipped.filter(ym => ym <= todayYM);
+  })();
+  const periods   = allMonths.map(ym => tsMonths[ym] || regMonths[ym]);
+  const n         = allMonths.length;
+
+  const ri  = a => ({ ...a, values: _reindexByMonth(_monthMap(a.values, tsPeriods),      allMonths) });
+  const riR = a => ({ ...a, values: _reindexByMonth(_monthMap(a.values, regTsData.periods), allMonths) });
+
+  const assets    = accts.filter(a => a.account_type === 'asset'     && !a.ignored).map(ri);
+  const liabs     = accts.filter(a => a.account_type === 'liability'  && !a.ignored).map(ri);
+  const allAssets = accts.filter(a => a.account_type === 'asset').map(ri);
+  const allLiabs  = accts.filter(a => a.account_type === 'liability').map(ri);
+
+  const cashAssets = regTsData.accounts.map(a => ({
+    ...riR(a), account_type: 'asset', cash: true, ignored: false,
+  }));
+
+  const allAssetsWithCash = [...assets,    ...cashAssets];
+  const allWithCash       = [...allAssets, ...cashAssets];
+
+  const totalAssets = allMonths.map((_, i) => allAssetsWithCash.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+  const totalLiabs  = allMonths.map((_, i) => liabs.reduce((s, a) => s + (a.values[i] ?? 0), 0));
+  const netWorth    = allMonths.map((_, i) => totalAssets[i] + totalLiabs[i]);
+  const dta         = allMonths.map((_, i) => totalAssets[i] ? Math.abs(totalLiabs[i]) / totalAssets[i] * 100 : 0);
+
+  return { assets: allAssetsWithCash, liabs, allAssets: allWithCash, allLiabs, totalAssets, totalLiabs, netWorth, dta, n, periods };
+}
+
+// ── Net worth chart ───────────────────────────────────────────────────────────
+function setNwMode(mode, btn) {
+  nwMode = mode;
+  document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderNwChart();
+}
+function renderNwChart() {
+  const { periods, netWorth, totalAssets, totalLiabs } = deriveSeries();
+  destroyChart('chart-nw');
+  let nwVals = netWorth, assetVals = totalAssets, liabVals = totalLiabs.map(v => Math.abs(v));
+  let yFmt = fmt;
+  if (nwMode === '%') {
+    const base = nw => v => base => v === null ? null : ((v - base) / Math.abs(base || 1)) * 100;
+    const idx = (arr) => { const b = arr.find(v => v !== null && v !== 0) ?? 1; return arr.map(v => ((v - b) / Math.abs(b)) * 100); };
+    nwVals = idx(netWorth); assetVals = idx(totalAssets); liabVals = idx(totalLiabs.map(Math.abs));
+    yFmt = v => fmtPct(v);
+  }
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const opts = baseOpts(yFmt);
+  opts.scales.x.ticks.maxRotation = 40;
+  charts['chart-nw'] = new Chart(document.getElementById('chart-nw'), {
+    type: 'line', data: { labels,
+      datasets: [
+        { label: 'Net Worth', data: nwVals, borderColor: '#378ADD', backgroundColor: 'rgba(55,138,221,0.08)', fill: true, tension: 0.3, pointRadius: 3 },
+        { label: 'Total Assets', data: assetVals, borderColor: '#5DCAA5', borderDash: [5,3], fill: false, tension: 0.3, pointRadius: 2 },
+        { label: 'Liabilities', data: liabVals, borderColor: '#E24B4A', borderDash: [5,3], fill: false, tension: 0.3, pointRadius: 2 },
+      ]
+    }, options: opts
+  });
+}
+
+// ── Allocation doughnut ───────────────────────────────────────────────────────
+function renderAllocChart() {
+  const { assets, periods } = deriveSeries();
+  const n = periods.length - 1;
+  const labels = assets.map(a => a.cash ? a.name + ' (Cash)' : a.name);
+  const values = assets.map(a => Math.max(0, a.values[n] ?? 0));
+  destroyChart('chart-alloc');
+  charts['chart-alloc'] = new Chart(document.getElementById('chart-alloc'), {
+    type: 'doughnut', data: { labels, datasets: [{ data: values, backgroundColor: ASSET_COLORS, borderWidth: 1 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => {
+        const total = ctx.chart.data.datasets[0].data.reduce((s, v) => s + v, 0);
+        const pct = total ? (ctx.parsed / total * 100).toFixed(1) : '0.0';
+        return ` ${ctx.label}: ${fmt(ctx.parsed)} (${pct}%)`;
+      }}}},
+      cutout: '60%'
+    }
+  });
+}
+
+// ── Debt-to-asset chart ───────────────────────────────────────────────────────
+function renderDtaChart() {
+  const { dta, periods } = deriveSeries();
+  const n = dta.length;
+  const curr = dta[n-1], prev = dta[n-2];
+  const delta = (prev !== undefined) ? curr - prev : null;
+  document.getElementById('dta-stat').textContent = curr.toFixed(1) + '%';
+  const dd = document.getElementById('dta-delta');
+  if (delta !== null) {
+    dd.textContent = (delta >= 0 ? '▲ ' : '▼ ') + Math.abs(delta).toFixed(1) + 'pp MoM';
+    dd.className = 'card-delta ' + (delta > 0 ? 'delta-down' : 'delta-up');
+  }
+  const pointColors = dta.map((v, i) => i === 0 ? TICK : (v <= dta[i-1] ? '#22c55e' : '#ef4444'));
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const mn = Math.min(...dta), mx = Math.max(...dta);
+  destroyChart('chart-dta');
+  charts['chart-dta'] = new Chart(document.getElementById('chart-dta'), {
+    type: 'line', data: { labels, datasets: [{
+      data: dta, borderColor: '#9ca3af', tension: 0.3, pointRadius: 4,
+      pointBackgroundColor: pointColors, fill: false
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.y.toFixed(1) + '%' } } },
+      scales: {
+        x: { grid: { color: GRID }, ticks: { color: TICK, maxRotation: 40 } },
+        y: { grid: { color: GRID }, ticks: { color: TICK, callback: v => v.toFixed(0) + '%' }, min: Math.max(0, mn - 0.5), max: mx + 0.5 }
+      }
+    }
+  });
+}
+
+// ── MoM change bar chart ──────────────────────────────────────────────────────
+function renderMomChart() {
+  const { assets, liabs, n } = deriveSeries();
+  if (n < 2) return;
+  const allAccts = [...assets, ...liabs];
+  const labels = allAccts.map(a => a.name);
+  const values = allAccts.map(a => {
+    const curr = a.values[n-1] ?? 0;
+    const prev = a.values[n-2] ?? 0;
+    // For both assets and liabilities use raw delta: a less-negative liability
+    // (paying down debt) is positive/green; a more-negative one is negative/red.
+    return curr - prev;
+  });
+  const colors = values.map((v, i) => v >= 0 ? '#22c55e' : '#ef4444');
+  destroyChart('chart-mom');
+  charts['chart-mom'] = new Chart(document.getElementById('chart-mom'), {
+    type: 'bar', data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.parsed.y) } } },
+      scales: {
+        x: { grid: { color: GRID }, ticks: { color: TICK, maxRotation: 40, autoSkip: false } },
+        y: { grid: { color: GRID }, ticks: { color: TICK, callback: fmt } }
+      }
+    }
+  });
+}
+
+// ── Assets tab chart ──────────────────────────────────────────────────────────
+function renderAssetsChart() {
+  const { assets, periods } = deriveSeries();
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const legend = document.getElementById('legend-assets');
+  legend.innerHTML = assets.map((a, i) =>
+    `<div class="legend-item"><div class="legend-dot" style="background:${ASSET_COLORS[i % ASSET_COLORS.length]}"></div>${escHtml(a.name)}${a.cash ? ' <span style="font-size:10px;color:var(--text-muted)">(Cash)</span>' : ''}</div>`
+  ).join('');
+  destroyChart('chart-assets');
+  charts['chart-assets'] = new Chart(document.getElementById('chart-assets'), {
+    type: 'line', data: { labels, datasets: assets.map((a, i) => ({
+      label: a.name, data: a.values, borderColor: ASSET_COLORS[i % ASSET_COLORS.length],
+      backgroundColor: 'transparent', tension: 0.3, pointRadius: 3, spanGaps: true
+    }))},
+    options: { ...baseOpts(fmt), plugins: { legend: { display: false } } }
+  });
+}
+
+// ── Liabilities tab chart ─────────────────────────────────────────────────────
+function renderLiabChart() {
+  const { liabs, periods } = deriveSeries();
+  if (!liabs.length) {
+    document.getElementById('legend-liab').innerHTML = '';
+    destroyChart('chart-liab');
+    return;
+  }
+  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  document.getElementById('legend-liab').innerHTML = liabs.map((a, i) =>
+    `<div class="legend-item"><div class="legend-dot" style="background:${LIAB_COLORS[i % LIAB_COLORS.length]}"></div>${escHtml(a.name)}</div>`
+  ).join('');
+  destroyChart('chart-liab');
+  charts['chart-liab'] = new Chart(document.getElementById('chart-liab'), {
+    type: 'line', data: { labels, datasets: liabs.map((a, i) => ({
+      label: a.name, data: a.values.map(v => v !== null ? Math.abs(v) : null),
+      borderColor: LIAB_COLORS[i % LIAB_COLORS.length], backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 3, spanGaps: true
+    }))},
+    options: {
+      ...baseOpts(fmt),
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: ctx => ' -' + fmt(Math.abs(ctx.parsed.y))
+      }}}
+    }
+  });
+}
+
+function renderAllCharts() {
+  // Balances can sit in the month after this one (Update balances allows next month's period for an
+  // end-of-month snapshot); the charts stop at today, so there may be nothing to draw yet.
+  if (!deriveSeries().periods.length) return;
+  renderNwChart();
+  renderAllocChart();
+  renderDtaChart();
+  renderMomChart();
+  renderAssetsChart();
+  renderLiabChart();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  const res = await fetch('/api/data/summary');
+  if (res.status === 401) return; // login overlay stays visible
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  loadAll();
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CASH FLOW / REGISTER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let cfAccounts   = [];        // register account list
+let cfCurrentId  = null;      // selected register_account id
+let cfAllTxns    = [];        // all transactions for current account (ascending, from API)
+let cfBalances   = {forecast_balance: 0, verified_balance: 0};
+let cfReconciling = false;
+// Sort / filter / pagination state
+let cfFilterText = '';
+let cfFilterRec  = 'all';   // 'all' | 'reconciled' | 'unreconciled'
+let cfPage     = 1;
+const CF_PER_PAGE = 50;
+let cfShowBankSubs = false;  // show/hide matched bank sub-rows
+let cfRecurring = [];         // upcoming recurring pattern predictions
+let cfDismissedPatterns = new Set(JSON.parse(localStorage.getItem('flow-dismissed-patterns') || '[]'));
+
+// ── Section switching ─────────────────────────────────────────────────────────
+const SECTIONS = {dashboard: 'app', cashflow: 'cashflow-app', cards: 'cards-app'};
+function showSection(section) {
+  for (const [name, id] of Object.entries(SECTIONS)) {
+    document.getElementById(id).classList.toggle('hidden', name !== section);
+    document.getElementById('nav-' + name).classList.toggle('active', name === section);
+  }
+  if (section === 'cashflow') cfLoadAccounts();
+  if (section === 'cards') cdShow();
+}
+
+async function openRegisterAccount(id) {
+  showSection('cashflow');
+  // Wait for cfLoadAccounts to populate the dropdown, then select the account
+  await cfLoadAccounts();
+  cfSelectAccount(String(id));
+  const sel = document.getElementById('cf-account-select');
+  if (sel) sel.value = id;
+}
+
+// ── Formatting helpers (cf-specific) ─────────────────────────────────────────
+function fmtFull(v) {
+  if (v === null || v === undefined) return '—';
+  const sign = v < 0 ? '-' : '';
+  return sign + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function cfFmtDate(s) {
+  const d = new Date(s + 'T00:00:00');
+  return (d.getMonth()+1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(-2);
+}
+function todayIso() {
+  return new Date().toISOString().slice(0,10);
+}
+
+// ── Register Accounts ─────────────────────────────────────────────────────────
+async function cfLoadAccounts() {
+  const res = await fetch('/api/register/accounts');
+  if (!res.ok) return;
+  cfAccounts = await res.json();
+  const sel = document.getElementById('cf-account-select');
+  const prev = cfCurrentId;
+  sel.innerHTML = '<option value="">— select account —</option>' +
+    cfAccounts.map(a => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('');
+  if (prev && cfAccounts.find(a => a.id === prev)) {
+    sel.value = prev;
+  } else if (!prev) {
+    const defAcct = cfAccounts.find(a => a.is_default) || (cfAccounts.length === 1 ? cfAccounts[0] : null);
+    if (defAcct) { sel.value = defAcct.id; cfCurrentId = defAcct.id; }
+  }
+  if (cfCurrentId) cfLoadTxns();
+  cfUpdateToolbar();
+}
+
+function cfSelectAccount(val) {
+  cfCurrentId = val ? parseInt(val) : null;
+  cfPage = 1; cfFilterText = ''; cfFilterRec = 'all';
+  cfRecurring = [];
+  document.getElementById('reg-min-credit').value = '';
+  document.getElementById('reg-min-debit').value = '';
+  document.getElementById('reg-search').value = '';
+  document.getElementById('reg-rec-filter').value = 'all';
+  cfSyncClear();
+  cfUpdateToolbar();
+  if (cfCurrentId) cfLoadTxns();
+  else { cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null}; renderRegister(); }
+}
+
+function cfToggleBankSubs() {
+  cfShowBankSubs = !cfShowBankSubs;
+  document.getElementById('cf-banksubs-btn').textContent = cfShowBankSubs ? '⇌ Hide matched' : '⇌ Show matched';
+  renderRegister();
+}
+
+// ── Description autocomplete helpers ─────────────────────────────────────────
+function _manualDescriptions() {
+  // Unique descriptions from manual transactions, newest first.
+  // Skip rows whose description was taken verbatim from a bank import
+  // (description === bank_description) so raw bank strings don't pollute
+  // the suggestions; user-customized descriptions are kept even if the row
+  // also has a bank_description (e.g. created via Add-to-Ledger and renamed).
+  const seen = new Set();
+  const result = [];
+  for (const t of [...cfAllTxns].reverse()) {  // cfAllTxns is asc, reverse = newest first
+    if (t.source !== 'manual' || !t.description) continue;
+    if (t.bank_description && t.description === t.bank_description) continue;
+    if (seen.has(t.description)) continue;
+    seen.add(t.description);
+    result.push({ description: t.description, amount: t.amount });
+  }
+  return result;
+}
+
+function _setupDescAutocomplete(inputId, listId, amountId = null) {
+  const input = document.getElementById(inputId);
+  const list  = document.getElementById(listId);
+  const amtEl = amountId ? document.getElementById(amountId) : null;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    list.innerHTML = '';
+    if (!q) return;
+    const matches = _manualDescriptions().filter(d => d.description.toLowerCase().includes(q));
+    matches.slice(0, 8).forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.description;
+      list.appendChild(opt);
+    });
+  });
+
+  if (amtEl) {
+    input.addEventListener('change', () => {
+      const val = input.value.trim();
+      const match = _manualDescriptions().find(d => d.description === val);
+      if (match && !amtEl.value.trim()) {
+        amtEl.value = match.amount.toFixed(2);
+      }
+    });
+  }
+}
+
+function cfUpdateToolbar() {
+  const has = !!cfCurrentId;
+  document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-banksubs-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-manage-btn').style.display = has ? '' : 'none';
+  if (has) {
+    const v = fmtFull(cfBalances.verified_balance);
+    const f = fmtFull(cfBalances.forecast_balance);
+    document.getElementById('cf-balance-summary').innerHTML =
+      `<span style="font-weight:700" title="Reconciled transactions only">✓ ${v}</span>` +
+      `&ensp;<span style="font-weight:700;font-style:italic" title="Including all future/unreconciled transactions">~ ${f}</span>`;
+  } else {
+    document.getElementById('cf-balance-summary').textContent = '';
+  }
+}
+
+async function doDeleteRAcct() {
+  const acct = cfAccounts.find(a => a.id === cfCurrentId);
+  if (!acct) return;
+  if (!confirm(`Delete ${acct.name} and all of its transactions, its cutoff and its import-format links? This cannot be undone.`)) return;
+  const res = await fetch(`/api/register/accounts/${cfCurrentId}`, {method: 'DELETE'});
+  if (res.ok || res.status === 204) {
+    cfCurrentId = null;
+    cfAllTxns = []; cfBalances = {forecast_balance:0, verified_balance:0, cutoff_date:null, cutoff_balance:null};
+    if (cfReconciling) { cfReconciling = false; document.getElementById('register-view').classList.remove('hidden'); document.getElementById('reconcile-view').classList.remove('active'); }
+    await cfLoadAccounts();
+    const acctRes = await fetch('/api/accounts');
+    if (acctRes.ok) accounts = await acctRes.json();
+    renderAccounts();
+    document.getElementById('cf-account-select').value = '';
+    renderRegister();
+    cfUpdateToolbar();
+  }
+}
+
+// ── Cash account dialog (new and edit) ────────────────────────────────────────
+let _mgmtNew = false;
+function _mgmtErr(msg) { document.getElementById('mgmt-error').textContent = msg || ''; }
+function openMgmtAcct(isNew) {
+  _mgmtNew = isNew === true;
+  const acct = _mgmtNew ? null : cfAccounts.find(a => a.id === cfCurrentId);
+  if (!_mgmtNew && !acct) return;
+  document.getElementById('mgmt-title').textContent = _mgmtNew ? 'New cash account' : 'Edit cash account';
+  document.getElementById('mgmt-name').value = acct ? acct.name : '';
+  document.getElementById('mgmt-institution').value = acct ? (acct.institution || '') : '';
+  document.getElementById('mgmt-notes').value = acct ? (acct.notes || '') : '';
+  document.getElementById('mgmt-opening').value = '0';
+  document.getElementById('mgmt-cutoff-date').value = acct ? (acct.cutoff_date || '') : '';
+  document.getElementById('mgmt-cutoff-balance').value = acct && acct.cutoff_balance != null ? acct.cutoff_balance.toFixed(2) : '';
+  document.getElementById('mgmt-clear-cutoff').checked = false;
+  document.getElementById('mgmt-is-default').checked = acct ? !!acct.is_default : false;
+  document.getElementById('mgmt-opening-section').classList.toggle('hidden', !_mgmtNew);
+  document.getElementById('mgmt-cutoff-section').classList.toggle('hidden', _mgmtNew);
+  document.getElementById('mgmt-delete').classList.toggle('hidden', _mgmtNew);
+  ipAccountSection(document.getElementById('mgmt-formats'), 'cash', acct ? acct.id : null);
+  _mgmtErr('');
+  document.getElementById('manage-acct-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('mgmt-name').focus(), 50);
+}
+function openAddRAcct() { openMgmtAcct(true); }
+
+function closeMgmtAcct() {
+  document.getElementById('manage-acct-modal').classList.add('hidden');
+}
+
+async function doSaveMgmtAcct() {
+  const name = document.getElementById('mgmt-name').value.trim();
+  const institution = document.getElementById('mgmt-institution').value.trim();
+  const notes = document.getElementById('mgmt-notes').value.trim();
+  const isDefault = document.getElementById('mgmt-is-default').checked;
+  if (!name) { _mgmtErr('Account name is required.'); return; }
+
+  if (_mgmtNew) {
+    const opening = parseFloat(document.getElementById('mgmt-opening').value) || 0;
+    const res = await fetch('/api/register/accounts', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, opening_balance: opening, institution, notes: notes || null, is_default: isDefault}),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { _mgmtErr(d.detail || 'Failed to create account'); return; }
+    closeMgmtAcct();
+    cfCurrentId = d.id;
+    await cfLoadAccounts();
+    document.getElementById('cf-account-select').value = d.id;
+    return;
+  }
+
+  const cutoffDateRaw = document.getElementById('mgmt-cutoff-date').value;
+  const cutoffBalRaw = document.getElementById('mgmt-cutoff-balance').value.trim();
+  const clearCutoff = document.getElementById('mgmt-clear-cutoff').checked;
+  const body = { name, institution, notes: notes || null, clear_cutoff: clearCutoff, is_default: isDefault };
+  if (!clearCutoff && cutoffDateRaw) {
+    const bal = cutoffBalRaw ? parseFloat(cutoffBalRaw.replace(/[$,\s]/g, '')) : null;
+    if (cutoffBalRaw && isNaN(bal)) { _mgmtErr('Cutoff balance must be a valid number.'); return; }
+    body.cutoff_date = cutoffDateRaw;
+    body.cutoff_balance = bal;
+  }
+
+  const res = await fetch(`/api/register/accounts/${cfCurrentId}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+
+  if (res.ok) {
+    const updated = await res.json();
+    // Refresh account list and re-render
+    cfAccounts = cfAccounts.map(a => a.id === updated.id ? updated : a);
+    const sel = document.getElementById('cf-account-select');
+    [...sel.options].forEach(o => { if (parseInt(o.value) === updated.id) o.textContent = updated.name; });
+    closeMgmtAcct();
+    await cfLoadTxns();
+    const acctRes = await fetch('/api/accounts');
+    if (acctRes.ok) accounts = await acctRes.json();
+    renderAccounts();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    _mgmtErr(d.detail || 'Failed to save.');
+  }
+}
+
+async function doDeleteRAcctFromMgmt() {
+  closeMgmtAcct();
+  await doDeleteRAcct();
+}
+
+// ── Load & render transactions ────────────────────────────────────────────────
+async function cfLoadTxns() {
+  if (!cfCurrentId) return;
+  cfPage = 1;
+  const [res, recurringRes] = await Promise.all([
+    fetch(`/api/register/${cfCurrentId}/transactions`),
+    fetch(`/api/register/${cfCurrentId}/recurring-patterns?days_ahead=31`),
+  ]);
+  if (!res.ok) return;
+  const data = await res.json();
+  cfRecurring = recurringRes.ok ? await recurringRes.json() : [];
+  cfAllTxns  = data.transactions || [];
+  cfBalances = {
+    forecast_balance: data.forecast_balance,
+    verified_balance: data.verified_balance,
+    cutoff_date: data.cutoff_date || null,
+    cutoff_balance: data.cutoff_balance != null ? data.cutoff_balance : null,
+  };
+  cfUpdateToolbar();
+  renderRegister();
+  if (cfReconciling) await renderReconcile();
+  // Refresh dashboard register account balances
+  const regRes = await fetch('/api/register/accounts');
+  if (regRes.ok) { cfAccounts = await regRes.json(); renderAccounts(); }
+}
+
+// ── Sort / filter helpers ──────────────────────────────────────────────────────
+function cfApplyFilter() {
+  cfFilterText = document.getElementById('reg-search').value.trim().toLowerCase();
+  cfFilterRec  = document.getElementById('reg-rec-filter').value;
+  cfPage = 1;
+  cfSyncClear();
+  renderRegister();
+}
+
+// "Clear filters" shows only while a filter is set.
+function cfSyncClear() {
+  const g = id => document.getElementById(id).value;
+  document.getElementById('reg-clear-filter').hidden =
+    !(g('reg-search').trim() || g('reg-min-credit') || g('reg-min-debit') || g('reg-rec-filter') !== 'all');
+}
+
+function cfClearFilter() {
+  document.getElementById('reg-search').value = '';
+  document.getElementById('reg-rec-filter').value = 'all';
+  cfFilterText = ''; cfFilterRec = 'all';
+  document.getElementById('reg-min-credit').value = '';
+  document.getElementById('reg-min-debit').value = '';
+  cfPage = 1;
+  cfSyncClear();
+  renderRegister();
+}
+
+function cfChangePage(delta) {
+  cfPage += delta;
+  renderRegister();
+}
+
+// ── Build display groups (manual row + optional bank sub-row) ─────────────────
+function buildGroups(txns) {
+  const byId = Object.fromEntries(txns.map(t => [t.id, t]));
+  const groups = [];
+  const usedBankIds = new Set();
+
+  for (const t of txns) {
+    // Treat as a bank row if source='bank', OR if bank_description is set and the
+    // row is unmatched (covers old imports that defaulted to source='manual').
+    const isBankOrigin = t.source === 'bank' || (!!t.bank_description && !t.matched_to_id);
+    if (isBankOrigin) {
+      if (t.matched_to_id) usedBankIds.add(t.id); // will appear as sub-row
+      else groups.push({primary: t, bank: null, isBank: true});
+      continue;
+    }
+    const bank = t.matched_to_id ? (byId[t.matched_to_id] || null) : null;
+    groups.push({primary: t, bank, isBank: false});
+  }
+  return groups;
+}
+
+function filterGroups(groups) {
+  const minCredit = parseFloat(document.getElementById('reg-min-credit').value) || null;
+  const minDebit  = parseFloat(document.getElementById('reg-min-debit').value)  || null;
+  return groups.filter(g => {
+    const t = g.primary;
+    if (cfFilterRec === 'reconciled'   && !t.is_reconciled) return false;
+    if (cfFilterRec === 'unreconciled' &&  t.is_reconciled) return false;
+    if (cfFilterText) {
+      const amt = Math.abs(t.amount).toFixed(2);
+      const haystack = ((t.description || '') + ' ' + (t.bank_description || '') + ' ' +
+                        (g.bank ? g.bank.bank_description || '' : '') + ' ' + amt).toLowerCase();
+      if (!haystack.includes(cfFilterText)) return false;
+    }
+    if (minCredit !== null && !(t.amount > 0 && t.amount >= minCredit)) return false;
+    if (minDebit  !== null && !(t.amount < 0 && -t.amount >= minDebit))  return false;
+    return true;
+  });
+}
+
+function sortGroups(groups) {
+  // Always date descending, then by created_at/id for stable same-day order
+  return [...groups].sort((a, b) => {
+    const ta = a.primary, tb = b.primary;
+    if (ta.date > tb.date) return -1;
+    if (ta.date < tb.date) return  1;
+    return (tb.id || 0) - (ta.id || 0);
+  });
+}
+
+function renderRegister() {
+  const tbody = document.getElementById('register-tbody');
+  const filterBar  = document.getElementById('reg-filter-bar');
+  const pagination = document.getElementById('reg-pagination');
+
+  const tfoot = document.getElementById('register-tfoot');
+  if (!cfCurrentId) {
+    filterBar.style.display = 'none'; pagination.style.display = 'none';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">Select or create an account to get started.</td></tr>';
+    tfoot.innerHTML = '';
+    return;
+  }
+  filterBar.style.display = '';
+
+  if (!cfAllTxns.length) {
+    pagination.style.display = 'none';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions yet. Add one or import a bank file.</td></tr>';
+    return;
+  }
+
+  const allGroups      = buildGroups(cfAllTxns);
+  const filteredGroups = filterGroups(allGroups);
+  const sortedGroups   = sortGroups(filteredGroups);
+
+  const total      = sortedGroups.length;
+  const totalPages = Math.max(1, Math.ceil(total / CF_PER_PAGE));
+  cfPage = Math.max(1, Math.min(cfPage, totalPages));
+  const start = (cfPage - 1) * CF_PER_PAGE;
+  const pageGroups = sortedGroups.slice(start, start + CF_PER_PAGE);
+
+  // Update filter controls
+  const minCredit = parseFloat(document.getElementById('reg-min-credit').value) || null;
+  const minDebit  = parseFloat(document.getElementById('reg-min-debit').value)  || null;
+  const hasFilter = cfFilterText || cfFilterRec !== 'all' || minCredit || minDebit;
+  document.getElementById('reg-clear-filter').style.display = hasFilter ? '' : 'none';
+  document.getElementById('reg-filter-count').textContent =
+    hasFilter ? `${filteredGroups.length} of ${allGroups.length} shown` : `${total} transactions`;
+
+  // Pagination controls — sync top and bottom bars
+  const paginationTop = document.getElementById('reg-pagination-top');
+  if (totalPages > 1) {
+    pagination.style.display = '';
+    paginationTop.style.display = '';
+    const pageInfo = `Page ${cfPage} of ${totalPages} (${total} rows)`;
+    document.getElementById('reg-page-info').textContent = pageInfo;
+    document.getElementById('reg-page-info-top').textContent = pageInfo;
+    document.getElementById('reg-prev').disabled = cfPage === 1;
+    document.getElementById('reg-next').disabled = cfPage === totalPages;
+    document.getElementById('reg-prev-top').disabled = cfPage === 1;
+    document.getElementById('reg-next-top').disabled = cfPage === totalPages;
+  } else {
+    pagination.style.display = 'none';
+    paginationTop.style.display = 'none';
+  }
+
+  const unmatchedManual = cfAllTxns.filter(t => t.source === 'manual' && !t.matched_to_id && !t.is_reconciled);
+
+  // Compute today's balance for the "today" marker row: latest balance on or before today.
+  const todayStr = todayIso();
+  let todayBalance = null;
+  for (const t of cfAllTxns) {
+    if (t.balance !== undefined && t.date <= todayStr) todayBalance = t.balance;
+  }
+
+  // Merge ghost rows (page 1, no active filter only) with real page rows, sorted date-desc
+  const ghostItems = (!hasFilter && cfPage === 1)
+    ? cfRecurring
+        .filter(p => !cfDismissedPatterns.has(p.description + '|' + p.frequency))
+        .map(p => ({ isGhost: true, date: p.next_expected_date, pattern: p }))
+    : [];
+
+  const allToRender = ghostItems.length
+    ? [...ghostItems, ...pageGroups].sort((a, b) => {
+        const da = a.isGhost ? a.date : a.primary.date;
+        const db = b.isGhost ? b.date : b.primary.date;
+        if (da > db) return -1;
+        if (da < db) return  1;
+        return 0;
+      })
+    : pageGroups;
+
+  // Sorted date-desc; inject "today" marker when we cross from future into past
+  let html = '';
+  let todayInserted = false;
+  for (const item of allToRender) {
+    const date = item.isGhost ? item.date : item.primary.date;
+    if (!todayInserted && date < todayStr) {
+      if (todayBalance !== null) html += renderTodayRow(todayStr, todayBalance);
+      todayInserted = true;
+    }
+    if (item.isGhost) {
+      html += renderGhostRow(item.pattern);
+    } else if (item.isBank) {
+      html += renderBankUnmatchedRow(item.primary, unmatchedManual);
+    } else {
+      html += renderManualRow(item.primary);
+      if (item.bank) html += renderBankSubRow(item.bank, item.primary);
+    }
+  }
+  if (!todayInserted && todayBalance !== null) {
+    html += renderTodayRow(todayStr, todayBalance);
+  }
+  tbody.innerHTML = html;
+
+  // Cutoff balance marker — only on the last page (oldest transactions)
+  if (cfBalances.cutoff_date && cfBalances.cutoff_balance != null && cfPage === totalPages) {
+    tfoot.innerHTML = `<tr class="cutoff-row">
+      <td data-col="date">${cfFmtDate(cfBalances.cutoff_date)}</td>
+      <td data-col="desc" colspan="3" style="font-style:italic">Balance override — transactions before this date are hidden</td>
+      <td data-col="balance" class="num"><span class="cutoff-bal">${fmtFull(cfBalances.cutoff_balance)}</span></td>
+      <td></td>
+      <td></td>
+    </tr>`;
+  } else {
+    tfoot.innerHTML = '';
+  }
+}
+
+function renderTodayRow(date, balance) {
+  return `<tr class="today-marker-row">
+    <td data-col="date" style="font-weight:600;white-space:nowrap">${cfFmtDate(date)}</td>
+    <td data-col="desc" style="font-weight:600;font-size:12px">Today</td>
+    <td></td>
+    <td></td>
+    <td data-col="balance" class="num" style="font-weight:700">${fmtFull(balance)}</td>
+    <td></td>
+    <td></td>
+  </tr>`;
+}
+
+function renderGhostRow(p) {
+  const credit = p.amount > 0 ? fmtFull(p.amount) : '';
+  const debit  = p.amount < 0 ? fmtFull(Math.abs(p.amount)) : '';
+  const freqLabels = {weekly:'weekly',biweekly:'bi-weekly',monthly:'monthly',quarterly:'quarterly',annual:'annual'};
+  const freq = freqLabels[p.frequency] || p.frequency;
+  const keyJson = escHtml(JSON.stringify(p.description + '|' + p.frequency));
+  const descJson = escHtml(JSON.stringify(p.description));
+  const dateJson = escHtml(JSON.stringify(p.next_expected_date));
+  return `<tr class="row-recurring">
+    <td data-col="date" style="white-space:nowrap">${cfFmtDate(p.next_expected_date)}</td>
+    <td data-col="desc">${escHtml(p.description)}<br><span class="rec-label">Predicted ${freq} · ${Math.round(p.confidence*100)}% confidence</span></td>
+    <td data-col="credit" class="num amount-credit">${credit}</td>
+    <td data-col="debit" class="num amount-debit">${debit}</td>
+    <td data-col="balance" class="num" style="color:var(--text-muted)">—</td>
+    <td></td>
+    <td data-col="actions"><div class="row-actions">
+      <button class="btn-sm btn-primary" onclick="confirmGhostRow(${descJson}, ${dateJson}, ${p.amount})">+ Confirm</button>
+      <button class="btn-sm" onclick="dismissGhostRow(this, ${keyJson})">✕</button>
+    </div></td>
+  </tr>`;
+}
+
+function confirmGhostRow(description, date, amount) {
+  openAddTxn();
+  document.getElementById('txn-desc').value = description;
+  document.getElementById('txn-date').value = date;
+  document.getElementById('txn-amount').value = amount.toFixed(2);
+}
+
+function dismissGhostRow(btn, key) {
+  cfDismissedPatterns.add(key);
+  localStorage.setItem('flow-dismissed-patterns', JSON.stringify([...cfDismissedPatterns]));
+  btn.closest('tr').remove();
+}
+
+function renderManualRow(t) {
+  const credit = t.amount > 0 ? fmtFull(t.amount) : '';
+  const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
+  const recIcon    = t.is_reconciled ? '<span class="rec-check">✓</span>' : '<span class="rec-none">○</span>';
+  const editBtn    = `<button class="btn-sm" onclick="openEditTxn(${t.id})" title="Edit">✎</button>`;
+  const dupeBtn    = !t.bank_description
+    ? `<button class="btn-sm" onclick="openDupeTxn(${t.id})" title="Duplicate">⧉</button>` : '';
+  const delBtn     = `<button class="btn-sm" onclick="doDeleteTxn(${t.id})" title="Delete" style="color:var(--red)">✕</button>`;
+  const balCls = t.is_reconciled ? '' : 'bal-forecast';
+  const balStr = t.balance !== undefined ? fmtFull(t.balance) : '';
+  return `<tr class="row-manual" data-id="${t.id}">
+    <td data-col="date">${cfFmtDate(t.date)}</td>
+    <td data-col="desc">${escHtml(t.description)}${t.notes && t.notes.replace(/\[Adjusted from [^\]]*\]/g, '').trim() ? `<br><span class="bank-desc">${escHtml(t.notes.replace(/\[Adjusted from [^\]]*\]/g, '').trim())}</span>` : ''}</td>
+    <td data-col="credit" class="num amount-credit">${credit}</td>
+    <td data-col="debit" class="num amount-debit">${debit}</td>
+    <td data-col="balance" class="num bal-col ${balCls}">${balStr}</td>
+    <td data-col="rec">${recIcon}</td>
+    <td data-col="actions"><div class="row-actions">${editBtn}${dupeBtn}${delBtn}</div></td>
+  </tr>`;
+}
+
+function renderBankSubRow(t, manualTxn) {
+  if (!cfShowBankSubs) return '';
+  const adjustMatch = manualTxn && manualTxn.notes ? manualTxn.notes.match(/\[Adjusted from [^\]]*\]/) : null;
+  const adjustNote = adjustMatch ? `<br><span class="bank-desc" style="margin-left:16px">${escHtml(adjustMatch[0])}</span>` : '';
+  // A matched-but-unconfirmed pair is a proposal, not a settled reconciliation:
+  // show its confidence rather than a checkmark that overstates the case.
+  const pending = !t.is_reconciled && t.match_score !== undefined;
+  const pendingBadge = pending
+    ? `&ensp;<span style="font-size:11px">${matchBadgeHtml(t.match_score, t.match_description_score)} · awaiting confirmation</span>`
+    : '';
+  return `<tr class="row-bank-sub" data-id="${t.id}">
+    <td data-col="desc" colspan="4" style="padding-left:28px">
+      <span class="bank-desc">↳ ${escHtml(t.bank_description || t.description)}</span>${pendingBadge}${adjustNote}
+    </td>
+    <td></td>
+    <td data-col="rec">${pending ? '<span class="rec-none">?</span>' : '<span class="rec-check">✓</span>'}</td>
+    <td data-col="actions"><button class="btn-sm" onclick="doUnmatch(${t.id})" title="Unmatch" style="font-size:10px">⇌</button></td>
+  </tr>`;
+}
+
+// A match reads as strong when the descriptions agree enough to act on without
+// comparing the two rows by eye. Below this the button stays neutral so the user
+// looks first. A date+amount collision caps at 50% by construction, so it can
+// never clear this bar.
+const CF_STRONG_MATCH = 0.70;
+
+function matchBadgeHtml(score, descScore) {
+  const pct = Math.round(score * 100);
+  const amountOnly = !descScore;
+  const color = score >= CF_STRONG_MATCH ? 'var(--green)' : 'var(--yellow, #c8a020)';
+  const note = amountOnly ? ' <span title="No words in common — verify before confirming">(amount &amp; date only)</span>' : '';
+  return `<span style="color:${color};font-weight:600">${pct}% match${note}</span>`;
+}
+
+// The Match button acts on whatever the dropdown has selected, so pre-select the
+// server's suggestion — that is the pairing the confidence score describes.
+function buildMatchOptions(t, manualList) {
+  const { sorted, usedFallback } = _manualOptionsForBank(t, manualList);
+  const sugId = t.suggestion ? t.suggestion.manual_id : null;
+  const exact = sorted.find(m => m.date === t.date && Math.abs(m.amount - t.amount) < 0.001) || null;
+  const preselect = (sugId !== null && sorted.some(m => m.id === sugId)) ? sugId
+    : (exact ? exact.id : null);
+  const options = sorted.map(m => {
+    const isExact = m.date === t.date && Math.abs(m.amount - t.amount) < 0.001;
+    const label = `${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})${isExact ? ' ★' : ''}`;
+    return `<option value="${m.id}"${m.id === preselect ? ' selected' : ''}>${label}</option>`;
+  }).join('');
+  const placeholder = preselect === null
+    ? (usedFallback ? 'Find Match… (no entries within ±14 days)' : 'Find Match…')
+    : (preselect === sugId ? 'Suggested match pre-selected ↓' : '★ Exact match pre-selected ↓');
+  return { options, placeholder, hasPreselect: preselect !== null };
+}
+
+function _manualOptionsForBank(bankTxn, manualList, dayWindow = 14) {
+  // Filter to ±dayWindow days of the bank transaction date.
+  // Fall back to full list if nothing is nearby (so the dropdown is never empty).
+  const bMs = new Date(bankTxn.date).getTime();
+  const winMs = dayWindow * 86400000;
+  const nearby = (manualList || []).filter(m =>
+    Math.abs(new Date(m.date).getTime() - bMs) <= winMs
+  );
+  const candidates = nearby.length > 0 ? nearby : (manualList || []);
+  const usedFallback = nearby.length === 0 && (manualList || []).length > 0;
+
+  // Exact date+amount match floats to the top (pre-selected); rest chronological.
+  const sorted = [...candidates].sort((a, b) => {
+    const aExact = a.date === bankTxn.date && Math.abs(a.amount - bankTxn.amount) < 0.001;
+    const bExact = b.date === bankTxn.date && Math.abs(b.amount - bankTxn.amount) < 0.001;
+    if (aExact !== bExact) return aExact ? -1 : 1;
+    if (a.date < b.date) return -1;
+    if (a.date > b.date) return 1;
+    return 0;
+  });
+
+  return { sorted, usedFallback };
+}
+
+function renderBankUnmatchedRow(t, unmatchedManual) {
+  const credit = t.amount > 0 ? fmtFull(t.amount) : '';
+  const debit  = t.amount < 0 ? fmtFull(Math.abs(t.amount)) : '';
+  const { options: opts, placeholder } = buildMatchOptions(t, unmatchedManual);
+  const sug = t.suggestion;
+  const strong = sug && sug.score >= CF_STRONG_MATCH;
+  const badge = sug ? `&ensp;${matchBadgeHtml(sug.score, sug.description_score)}` : '';
+  const safeDesc = escHtml(JSON.stringify(t.bank_description || t.description));
+  const balStr = t.balance !== undefined ? fmtFull(t.balance) : '';
+  return `<tr class="row-bank-unmatched" data-id="${t.id}">
+    <td data-col="date">${cfFmtDate(t.date)}</td>
+    <td data-col="desc">
+      <span class="bank-desc">${escHtml(t.bank_description || t.description)}</span>
+      <div class="row-actions" style="margin-top:4px">
+        <select class="match-select" id="match-sel-${t.id}">
+          <option value="">${placeholder}</option>${opts}
+        </select>
+        <button class="btn-sm ${strong ? 'btn-primary' : ''}" onclick="doManualMatch(${t.id})">${strong ? '✓ Match' : 'Match'}</button>
+        <button class="btn-sm" onclick="openAtl(${t.id}, ${safeDesc})">+ Add to Ledger</button>${badge}
+      </div>
+    </td>
+    <td data-col="credit" class="num amount-credit">${credit}</td>
+    <td data-col="debit" class="num amount-debit">${debit}</td>
+    <td data-col="balance" class="num bal-col bal-forecast">${balStr}</td>
+    <td data-col="rec"><span class="rec-none">?</span></td>
+    <td data-col="actions"><button class="btn-sm" onclick="doDeleteTxn(${t.id})" style="color:var(--red)" title="Delete">✕</button></td>
+  </tr>`;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Add / Edit Transaction ────────────────────────────────────────────────────
+let _descAutocompleteSetup = false;
+function openAddTxn() {
+  document.getElementById('add-txn-title').textContent = 'Add Transaction';
+  document.getElementById('edit-txn-id').value = '';
+  document.getElementById('txn-date').value = todayIso();
+  document.getElementById('txn-desc').value = '';
+  document.getElementById('txn-amount').value = '';
+  document.getElementById('txn-notes').value = '';
+  document.getElementById('add-txn-error').style.display = 'none';
+  document.getElementById('add-txn-modal').classList.remove('hidden');
+  if (!_descAutocompleteSetup) { _setupDescAutocomplete('txn-desc', 'txn-desc-list', 'txn-amount'); _descAutocompleteSetup = true; }
+  setTimeout(() => document.getElementById('txn-desc').focus(), 50);
+}
+function openEditTxn(id) {
+  const t = cfAllTxns.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('add-txn-title').textContent = 'Edit Transaction';
+  document.getElementById('edit-txn-id').value = id;
+  document.getElementById('txn-date').value = t.date;
+  document.getElementById('txn-desc').value = t.description;
+  // Show full signed value with 2 decimal places
+  document.getElementById('txn-amount').value = t.amount.toFixed(2);
+  document.getElementById('txn-notes').value = t.notes || '';
+  document.getElementById('add-txn-error').style.display = 'none';
+  document.getElementById('add-txn-modal').classList.remove('hidden');
+}
+function openDupeTxn(id) {
+  const t = cfAllTxns.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('add-txn-title').textContent = 'Add Transaction';
+  document.getElementById('edit-txn-id').value = '';
+  document.getElementById('txn-date').value = todayIso();
+  document.getElementById('txn-desc').value = t.description;
+  document.getElementById('txn-amount').value = t.amount.toFixed(2);
+  document.getElementById('txn-notes').value = '';
+  document.getElementById('add-txn-error').style.display = 'none';
+  document.getElementById('add-txn-modal').classList.remove('hidden');
+  if (!_descAutocompleteSetup) { _setupDescAutocomplete('txn-desc', 'txn-desc-list', 'txn-amount'); _descAutocompleteSetup = true; }
+  setTimeout(() => document.getElementById('txn-date').focus(), 50);
+}
+function closeAddTxn() { document.getElementById('add-txn-modal').classList.add('hidden'); }
+
+function _parseAmount(raw) {
+  // Strip $, commas, spaces; allow leading minus
+  const cleaned = raw.replace(/[$,\s]/g, '');
+  if (!/^-?\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  return parseFloat(cleaned);
+}
+
+async function doSaveTxn() {
+  const editId = document.getElementById('edit-txn-id').value;
+  const date = document.getElementById('txn-date').value;
+  const description = document.getElementById('txn-desc').value.trim();
+  const amount = _parseAmount(document.getElementById('txn-amount').value);
+  const notes = document.getElementById('txn-notes').value.trim() || null;
+  const errEl = document.getElementById('add-txn-error');
+
+  if (!date || !description) {
+    errEl.textContent = 'Date and description are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (amount === null || amount === 0) {
+    errEl.textContent = 'Enter a valid non-zero amount (e.g. -1234.56 or 500.00).';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  let res;
+  if (editId) {
+    res = await fetch(`/api/register/transactions/${editId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({date, description, amount, notes})
+    });
+  } else {
+    res = await fetch(`/api/register/${cfCurrentId}/transactions`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({date, description, amount, notes})
+    });
+  }
+
+  if (res.ok) {
+    closeAddTxn();
+    await cfLoadTxns();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    errEl.textContent = d.detail || 'Failed to save transaction';
+    errEl.style.display = 'block';
+  }
+}
+
+// ── Delete transaction ────────────────────────────────────────────────────────
+async function doDeleteTxn(id) {
+  if (!confirm('Delete this transaction?')) return;
+  const res = await fetch(`/api/register/transactions/${id}`, {method:'DELETE'});
+  if (res.ok || res.status === 204) await cfLoadTxns();
+}
+
+// ── Unmatch ───────────────────────────────────────────────────────────────────
+async function doUnmatch(id) {
+  const res = await fetch('/api/register/reconcile/unmatch', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({txn_id: id})
+  });
+  if (res.ok) { await cfLoadTxns(); if (cfReconciling) await renderReconcile(); }
+}
+
+// ── Manual match (from bank row dropdown) ─────────────────────────────────────
+async function doManualMatch(bankId) {
+  const manualId = parseInt(document.getElementById(`match-sel-${bankId}`)?.value);
+  if (!manualId) { alert('Please select a ledger entry to match with.'); return; }
+  const res = await fetch('/api/register/reconcile/match', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bank_txn_id: bankId, manual_txn_id: manualId})
+  });
+  if (res.ok) await cfLoadTxns();
+}
+
+// ── Add to Ledger ─────────────────────────────────────────────────────────────
+let _atlDescAutocompleteSetup = false;
+function openAtl(bankId, bankDesc) {
+  document.getElementById('atl-bank-txn-id').value = bankId;
+  document.getElementById('atl-bank-desc').textContent = 'Bank: ' + bankDesc;
+  document.getElementById('atl-desc').value = bankDesc;
+  document.getElementById('atl-notes').value = '';
+  document.getElementById('add-to-ledger-modal').classList.remove('hidden');
+  if (!_atlDescAutocompleteSetup) { _setupDescAutocomplete('atl-desc', 'atl-desc-list'); _atlDescAutocompleteSetup = true; }
+  setTimeout(() => document.getElementById('atl-desc').focus(), 50);
+}
+function closeAtl() { document.getElementById('add-to-ledger-modal').classList.add('hidden'); }
+async function doAddToLedger() {
+  const bankId = parseInt(document.getElementById('atl-bank-txn-id').value);
+  const description = document.getElementById('atl-desc').value.trim();
+  const notes = document.getElementById('atl-notes').value.trim() || null;
+  const res = await fetch('/api/register/reconcile/add-to-ledger', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bank_txn_id: bankId, description, notes})
+  });
+  if (res.ok) {
+    closeAtl();
+    await cfLoadTxns();
+  }
+}
+
+// ── Reconcile mode ────────────────────────────────────────────────────────────
+async function toggleReconcile() {
+  cfReconciling = !cfReconciling;
+  document.getElementById('register-view').classList.toggle('hidden', cfReconciling);
+  document.getElementById('reconcile-view').classList.toggle('active', cfReconciling);
+  document.getElementById('cf-reconcile-btn').textContent = cfReconciling ? '✕ Exit Reconcile' : '⇄ Reconcile';
+  if (cfReconciling) await renderReconcile();
+}
+
+async function renderReconcile() {
+  if (!cfCurrentId) return;
+  const res = await fetch(`/api/register/${cfCurrentId}/reconcile`);
+  if (!res.ok) return;
+  const data = await res.json();
+
+  // Build pending auto-matches section
+  const pendingSection = document.getElementById('rec-pending-section');
+  const pendingEl = document.getElementById('rec-pending-list');
+  const pending = data.pending_matches || [];
+  if (pending.length) {
+    pendingSection.style.display = '';
+    pendingEl.innerHTML = pending.map(p => {
+      const b = p.bank, m = p.manual;
+      const strongPending = p.score >= CF_STRONG_MATCH;
+      return `
+        <div class="rec-row" style="border-left:3px solid var(--green);padding-left:11px">
+          <div class="rec-row-top" style="margin-bottom:4px">
+            <span class="rec-row-date">${cfFmtDate(b.date)}</span>
+            <span class="rec-row-desc bank-desc">${escHtml(b.bank_description || b.description)}</span>
+            <span class="rec-row-amt ${b.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(b.amount)}</span>
+          </div>
+          <div class="rec-pending-meta" style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:6px">
+            ${matchBadgeHtml(p.score, p.description_score)}
+            <span>→ Ledger: ${cfFmtDate(m.date)} — ${escHtml(m.description)} (${fmtFull(m.amount)})</span>
+          </div>
+          <div class="rec-actions">
+            <button class="btn-sm ${strongPending ? 'btn-primary' : ''}" onclick="doRecConfirmPending(${b.id}, ${m.id})">${strongPending ? '✓ Confirm' : 'Confirm'}</button>
+            <button class="btn-sm" style="color:var(--red)" onclick="doRecRejectPending(${b.id})">✕ Reject</button>
+          </div>
+        </div>`;
+    }).join('');
+  } else {
+    pendingSection.style.display = 'none';
+  }
+
+  // Build manual list
+  const manualEl = document.getElementById('rec-manual-list');
+  if (!data.unmatched_manual.length) {
+    manualEl.innerHTML = '<div class="rec-row" style="color:var(--text-muted);font-size:12px">All ledger entries matched.</div>';
+  } else {
+    manualEl.innerHTML = data.unmatched_manual.map(t => `
+      <div class="rec-row" data-id="${t.id}">
+        <div class="rec-row-top">
+          <span class="rec-row-date">${cfFmtDate(t.date)}</span>
+          <span class="rec-row-desc">${escHtml(t.description)}</span>
+          <span class="rec-row-amt ${t.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(t.amount)}</span>
+        </div>
+        <div class="rec-actions">
+          <button class="btn-sm" onclick="doMarkReconciled(${t.id})">Mark Reconciled</button>
+        </div>
+      </div>`).join('');
+  }
+
+  // Build bank list
+  const bankEl = document.getElementById('rec-bank-list');
+  if (!data.unmatched_bank.length) {
+    bankEl.innerHTML = '<div class="rec-row" style="color:var(--text-muted);font-size:12px">All bank transactions matched.</div>';
+  } else {
+    bankEl.innerHTML = data.unmatched_bank.map(t => {
+      const sug = t.suggestion;
+      const sugManual = sug ? data.unmatched_manual.find(m => m.id === sug.manual_id) : null;
+      // No Match button here: the dropdown below is pre-selected to this very
+      // suggestion, so its button already does exactly this. One action, one place.
+      const sugHtml = sugManual ? `
+        <div class="rec-suggestion">
+          <strong>Suggested:</strong>
+          ${cfFmtDate(sugManual.date)} — ${escHtml(sugManual.description)} (${fmtFull(sugManual.amount)})
+          &ensp;${matchBadgeHtml(sug.score, sug.description_score)}
+        </div>` : '';
+      const strong = sug && sug.score >= CF_STRONG_MATCH;
+      const { options: manualOptions, placeholder: recPlaceholder } =
+        buildMatchOptions(t, data.unmatched_manual);
+      return `
+        <div class="rec-row" data-id="${t.id}">
+          <div class="rec-row-top">
+            <input type="checkbox" class="rec-bank-chk" data-id="${t.id}" onchange="recUpdateBulkBar()" style="margin-right:4px;flex-shrink:0">
+            <span class="rec-row-date">${cfFmtDate(t.date)}</span>
+            <span class="rec-row-desc bank-desc">${escHtml(t.bank_description || t.description)}</span>
+            <span class="rec-row-amt ${t.amount >= 0 ? 'amount-credit' : 'amount-debit'}">${fmtFull(t.amount)}</span>
+          </div>
+          ${sugHtml}
+          <div class="rec-actions">
+            <select class="match-select" id="rec-sel-${t.id}">
+              <option value="">${recPlaceholder}</option>
+              ${manualOptions}
+            </select>
+            <button class="btn-sm ${strong ? 'btn-primary' : ''}" onclick="doRecMatchSel(${t.id})">${strong ? '✓ Match' : 'Match'}</button>
+            <button class="btn-sm" onclick="openAtl(${t.id}, ${escHtml(JSON.stringify(t.bank_description || t.description))})">+ Add to Ledger</button>
+          </div>
+        </div>`;
+    }).join('');
+    recUpdateBulkBar();
+  }
+}
+
+function _recCheckedIds() {
+  return [...document.querySelectorAll('.rec-bank-chk:checked')].map(el => parseInt(el.dataset.id));
+}
+
+function recToggleAll(checked) {
+  document.querySelectorAll('.rec-bank-chk').forEach(el => el.checked = checked);
+  recUpdateBulkBar();
+}
+
+function recUpdateBulkBar() {
+  const ids = _recCheckedIds();
+  const bar = document.getElementById('rec-bulk-bar');
+  const allChk = document.getElementById('rec-select-all');
+  const total = document.querySelectorAll('.rec-bank-chk').length;
+  bar.style.display = ids.length ? 'flex' : 'none';
+  document.getElementById('rec-sel-count').textContent = `${ids.length} of ${total} selected`;
+  if (allChk) allChk.checked = total > 0 && ids.length === total;
+}
+
+async function doBulkAddToLedger() {
+  const ids = _recCheckedIds();
+  if (!ids.length) return;
+  const res = await fetch('/api/register/reconcile/bulk-add-to-ledger', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({bank_txn_ids: ids})
+  });
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+
+async function doBulkDelete() {
+  const ids = _recCheckedIds();
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} selected bank transaction(s)?`)) return;
+  await Promise.all(ids.map(id =>
+    fetch(`/api/register/transactions/${id}`, {method: 'DELETE'})
+  ));
+  await cfLoadTxns();
+  await renderReconcile();
+}
+
+async function doMarkReconciled(id) {
+  const res = await fetch(`/api/register/transactions/${id}/mark-reconciled`, {method:'POST'});
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+
+async function doRecMatch(bankId, manualId) {
+  const res = await fetch('/api/register/reconcile/match', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bank_txn_id: bankId, manual_txn_id: manualId})
+  });
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+
+async function doRecMatchSel(bankId) {
+  const manualId = parseInt(document.getElementById(`rec-sel-${bankId}`)?.value);
+  if (!manualId) { alert('Select a ledger entry to match.'); return; }
+  await doRecMatch(bankId, manualId);
+}
+
+async function doRecConfirmPending(bankId, manualId) {
+  await doRecMatch(bankId, manualId);
+}
+
+async function doRecRejectPending(bankId) {
+  const res = await fetch('/api/register/reconcile/unmatch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({txn_id: bankId})
+  });
+  if (res.ok) { await cfLoadTxns(); await renderReconcile(); }
+}
+</script>
+<script src="/static/cards.js"></script>
+<script src="/static/importprofiles.js"></script>
+
+<!-- Assistant panel (code name "ask") -->
+<aside id="ask-panel" class="hidden" aria-label="Assistant">
+  <div class="ask-head"><h2>Assistant</h2><button id="ask-balances" title="Type or paste account balances">Update balances</button><button id="ask-new">New chat</button><button id="ask-close" aria-label="Close">✕</button></div>
+  <div class="ask-meter" id="ask-meter"></div>
+  <div class="ask-log" id="ask-log"></div>
+  <div id="ask-attached" class="ask-attached hidden"></div>
+  <div class="ask-input"><label class="ask-attach" title="Attach a statement file so the Assistant can set up its import format">📎<input type="file" id="ask-file" accept=".csv,.tsv,.txt,.xlsx,.xlsm" aria-label="Attach a statement file"></label>
+    <textarea id="ask-q" rows="2" maxlength="1000" placeholder="Ask about your spending, or what to change…"></textarea>
+    <button id="ask-send" class="btn-primary">Send</button></div>
+</aside>
+<script src="/static/balances.js"></script>
+<script src="/static/cashflow.js"></script>
+<script src="/static/ask.js"></script>
+<script src="/static/ai.js"></script>
+</body>
+</html>

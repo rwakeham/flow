@@ -1,0 +1,13 @@
+/* The AI dialog (static/ai.js); tables and log styles come from cards.css. */
+.ai-modal .modal-box { width: 980px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+.ai-modal .cd-card { margin-top: 12px; }
+.ai-modal code { font-size: 12px; }
+.ai-modal .cd-card-b label.f { font-size: 12px; color: var(--text-muted); display: block; margin: 10px 0 3px; }
+.ai-modal .cd-card-b input[type=text], .ai-modal .cd-card-b input[type=password] {
+  width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.ai-modal .cd-card-b input:disabled { opacity: 0.6; }
+.ai-modal .ai-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.ai-modal .ai-row input { flex: 1; min-width: 200px; }
+.ai-modal .ai-env { font-size: 12px; color: var(--text-muted); margin: 4px 0 6px; }
+.ai-modal .cd-check { display: flex; gap: 8px; align-items: center; font-size: 13px; }

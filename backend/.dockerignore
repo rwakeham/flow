@@ -1,0 +1,7 @@
+# Only what the app runs: the image gets `COPY . .` of this directory.
+# Tests, fixtures and caches stay out of it.
+test_*.py
+testdata/
+__pycache__/
+*.pyc
+.pytest_cache/

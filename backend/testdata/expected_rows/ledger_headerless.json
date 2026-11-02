@@ -1,0 +1,22 @@
+{
+ "ledger_rows": [
+  {
+   "amount": 2478.3,
+   "date": "2026-10-01",
+   "description": "Paycheck",
+   "is_reconciled": true
+  },
+  {
+   "amount": -1200.0,
+   "date": "2026-10-02",
+   "description": "Rent",
+   "is_reconciled": false
+  },
+  {
+   "amount": -1200.0,
+   "date": "2026-11-01",
+   "description": "Next month rent",
+   "is_reconciled": false
+  }
+ ]
+}

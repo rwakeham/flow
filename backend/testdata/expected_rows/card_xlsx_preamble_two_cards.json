@@ -1,0 +1,47 @@
+{
+ "card_numbers": [
+  "9999",
+  "1002"
+ ],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "-99999",
+   "amount": -12.0,
+   "cardholder": "JANE EXAMPLE",
+   "city_state": "SPRINGFIELD\nIL",
+   "country": "UNITED STATES",
+   "date": "2026-10-01",
+   "extended": "",
+   "issuer_category": "Restaurant-Restaurant",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "LUNCH PLACE",
+   "reference": "8",
+   "source_amount": 12.0
+  },
+  {
+   "account": "-51002",
+   "amount": -5.0,
+   "cardholder": "JANE EXAMPLE",
+   "city_state": "SPRINGFIELD\nIL",
+   "country": "UNITED STATES",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "Restaurant-Restaurant",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "COFFEE SHOP",
+   "reference": "9",
+   "source_amount": 5.0
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_positive",
+ "statement_end": "2026-10-22",
+ "statement_start": "2026-09-22",
+ "suggested_cardholders": [
+  "JANE EXAMPLE"
+ ],
+ "suggested_last4": "9999"
+}

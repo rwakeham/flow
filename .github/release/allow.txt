@@ -1,0 +1,15 @@
+# Known false positives of the privacy check, one per line: <path>:<rule>
+# (the path as the check reports it, the rule name in brackets in its output).
+# Keep this short, and say why next to each entry. Denylist hits can't be allowed
+# here: take the term out of the file, or out of the denylist.
+
+# test_release.py holds made-up examples of exactly what the rules catch (a key header, a
+# Luhn-valid card number, a session link, a personal-looking email, a home path).
+.github/release/test_release.py:private-key
+.github/release/test_release.py:anthropic-key
+.github/release/test_release.py:github-token
+.github/release/test_release.py:aws-key
+.github/release/test_release.py:claude-session-link
+.github/release/test_release.py:email
+.github/release/test_release.py:card-number
+.github/release/test_release.py:home-path

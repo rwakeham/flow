@@ -1,0 +1,26 @@
+# Proposes new base-image digests as pull requests. Only digest and patch-level updates of the
+# pinned tags: Python stays on 3.12, and Postgres never changes major version (a newer server
+# can't open the existing data directory without a dump and restore).
+version: 2
+updates:
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  # The actions in .github/workflows are pinned by commit; this proposes new ones.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

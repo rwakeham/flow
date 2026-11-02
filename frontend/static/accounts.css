@@ -1,0 +1,32 @@
+/* The account dialogs: cash (index.html #manage-acct-modal), card (cards.js #cd-acct-modal) and
+   balance-sheet (index.html #bal-acct-modal). One frame and one field order for all three:
+   Name, Institution, Notes, the kind's own section, Import files, Options; Delete left, Cancel and
+   Save right. Loaded after cards.css and balances.css, so these rules win. */
+.modal-box.acct-dlg { width: 560px; max-width: 96vw; max-height: 92vh; overflow-y: auto; gap: 0; box-sizing: border-box; }
+.modal-box.acct-dlg h2 { margin: 0 0 4px; }
+.acct-dlg .acct-field { margin-top: 12px; }
+.acct-dlg .acct-field > label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.acct-dlg .acct-field input[type=text], .acct-dlg .acct-field input[type=number], .acct-dlg .acct-field input[type=date],
+.acct-dlg .acct-field select, .acct-dlg .acct-field textarea {
+  width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 13px; font-family: inherit; }
+.acct-dlg .acct-field textarea { resize: vertical; }
+.acct-dlg-help { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.45; }
+.acct-dlg-section { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+.acct-dlg-h { font-size: 13px; font-weight: 600; color: var(--text); }
+.acct-dlg-pair { display: flex; gap: 10px; }
+.acct-dlg-pair > .acct-field { flex: 1; min-width: 0; }
+.acct-dlg-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px; cursor: pointer; }
+.acct-dlg-check input { width: auto; margin: 0; }
+.acct-dlg-err { color: var(--red); font-size: 12px; margin-top: 10px; }
+.acct-dlg-err:empty { display: none; }
+.modal-box.acct-dlg .modal-footer { margin-top: 18px; }
+.acct-dlg-delete { color: var(--red); margin-right: auto; }
+.acct-dlg-delete.hidden { display: none; }
+.acct-dlg .hidden { display: none; }
+/* The balance account's history table keeps compact inputs. */
+.acct-dlg .bal-table input { width: 110px; padding: 6px 9px; }
+@media (max-width: 520px) {
+  .modal-box.acct-dlg { padding: 20px 16px; }
+  .acct-dlg-pair { flex-direction: column; gap: 0; }
+}

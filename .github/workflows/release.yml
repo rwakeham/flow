@@ -1,0 +1,151 @@
+# Releases are manual: Actions -> Release -> Run workflow (on main). The run works out the
+# next version from the commits since the last release (or the bump you pick), privacy-checks
+# the tree and the notes, commits the bump to backend/VERSION, tags it v<version> with the
+# notes and publishes the GitHub Release. See .github/release/README.md.
+#
+# Pushes to main and pull requests run the same steps up to the preview: what the next
+# release would be, its notes and the privacy check. They never commit, tag or publish.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (auto: from the commits since the last release)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      dry_run:
+        description: "Dry run: show what would be released, change nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    if: github.event_name != 'pull_request'     # ci.yml already runs on pull requests
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: tests
+    if: ${{ !cancelled() && github.repository == 'rwakeham/flow' && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                           # the version bump commit, the tag and the Release
+    env:
+      BOT_NAME: github-actions[bot]
+      BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0                        # every tag and the history the bump and notes come from
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Work out the next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          python3 .github/release/release.py next --bump "$BUMP" --ok-if-nothing \
+            > "$RUNNER_TEMP/next" 2> "$RUNNER_TEMP/why"
+          cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/why"
+          { echo '```'; cat "$RUNNER_TEMP/why"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Decide whether to publish
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          NOTHING: ${{ steps.next.outputs.nothing }}
+          TAG: ${{ steps.next.outputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          publish=false
+          if [[ "$NOTHING" == "true" ]]; then
+            why="nothing to release since the last release"
+          elif [[ "$EVENT" != "workflow_dispatch" ]]; then
+            why="preview of ${TAG}: releases are made with Actions -> Release -> Run workflow"
+          elif [[ "$REF" != "refs/heads/main" ]]; then
+            why="releases run on main only"
+          elif [[ "$DRY_RUN" == "true" ]]; then
+            why="dry run of ${TAG} (as asked)"
+          else
+            publish=true
+            why="releasing ${TAG}"
+          fi
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "### ${why}" >> "$GITHUB_STEP_SUMMARY"
+          echo "$why"
+
+      - name: Bump backend/VERSION (a local commit until the release is published)
+        if: steps.next.outputs.nothing != 'true' && steps.next.outputs.bumped == 'true'
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          printf '%s\n' "$VERSION" > backend/VERSION
+          git -c "user.name=$BOT_NAME" -c "user.email=$BOT_EMAIL" commit --quiet -m "Release ${VERSION}" backend/VERSION
+
+      - name: Build the release notes and the tree to check
+        if: steps.next.outputs.nothing != 'true'
+        run: |
+          python3 .github/release/release.py snapshot "$RUNNER_TEMP/preview/tree"
+          python3 .github/release/release.py notes "$RUNNER_TEMP/preview/notes.md"
+
+      - name: Privacy check
+        if: steps.next.outputs.nothing != 'true'
+        env:
+          PUBLISH_DENYLIST: ${{ secrets.PUBLISH_DENYLIST }}
+          REQUIRE: ${{ steps.decide.outputs.publish == 'true' && '--require-denylist' || '' }}
+        run: |
+          python3 .github/release/release.py check "$RUNNER_TEMP/preview/tree" \
+            --notes "$RUNNER_TEMP/preview/notes.md" $REQUIRE | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the preview (the notes, and the tree as checked)
+        if: ${{ !cancelled() && steps.next.outputs.nothing != 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flow-${{ steps.next.outputs.version }}-release-preview
+          path: ${{ runner.temp }}/preview
+          include-hidden-files: true
+          retention-days: 14
+
+      # From here on, only a real release. The bump goes to main first: if main moved since
+      # the run started, this push fails and nothing is published (run it again).
+      - name: Push the version bump to main
+        if: steps.decide.outputs.publish == 'true' && steps.next.outputs.bumped == 'true'
+        run: git push origin HEAD:refs/heads/main
+
+      - name: Tag the release and publish it
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.next.outputs.version }}
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # A run that tagged but failed to publish the Release picks up here.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+            git -c "user.name=$BOT_NAME" -c "user.email=$BOT_EMAIL" \
+              tag -a "$TAG" --cleanup=verbatim -F "$RUNNER_TEMP/preview/notes.md"
+            git push origin "refs/tags/${TAG}"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists"
+          else
+            gh release create "$TAG" --verify-tag --latest \
+              --title "Flow ${VERSION}" --notes-file "$RUNNER_TEMP/preview/notes.md"
+          fi
+          echo "Published ${TAG}: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,29 @@
+{
+ "card_numbers": [],
+ "pending_dropped": 1,
+ "rows": [
+  {
+   "account": "",
+   "amount": -88.1,
+   "cardholder": "JANE EXAMPLE",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "COSTCO WHSE #123",
+   "reference": "",
+   "source_amount": 88.1
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "debit_credit_columns",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [
+  "JANE EXAMPLE"
+ ],
+ "suggested_last4": null
+}

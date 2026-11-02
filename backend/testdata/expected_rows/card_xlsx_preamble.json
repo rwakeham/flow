@@ -1,0 +1,61 @@
+{
+ "card_numbers": [
+  "9999"
+ ],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "-99999",
+   "amount": -32.01,
+   "cardholder": "JANE EXAMPLE",
+   "city_state": "SPRINGFIELD\nIL",
+   "country": "UNITED STATES",
+   "date": "2026-10-21",
+   "extended": "",
+   "issuer_category": "Restaurant-Restaurant",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "GREEN BOWL - SPRINSPRINGFIELD          IL",
+   "reference": "1",
+   "source_amount": 32.01
+  },
+  {
+   "account": "-99999",
+   "amount": 500.0,
+   "cardholder": "JANE EXAMPLE",
+   "city_state": "",
+   "country": "UNITED STATES",
+   "date": "2026-10-16",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "AUTOPAY PAYMENT - THANK YOU",
+   "reference": "2",
+   "source_amount": -500.0
+  },
+  {
+   "account": "-99999",
+   "amount": -275.34,
+   "cardholder": "JANE EXAMPLE",
+   "city_state": "SPRINGFIELD\nIL",
+   "country": "UNITED STATES",
+   "date": "2026-10-01",
+   "extended": "10000000001MONTHLY DUES",
+   "issuer_category": "Entertainment-Associations",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "EXAMPLEFITNESS.COM 555-0100            IL",
+   "reference": "3",
+   "source_amount": 275.34
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_positive",
+ "statement_end": "2026-10-22",
+ "statement_start": "2026-09-22",
+ "suggested_cardholders": [
+  "JANE EXAMPLE"
+ ],
+ "suggested_last4": "9999"
+}

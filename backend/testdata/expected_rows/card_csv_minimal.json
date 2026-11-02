@@ -1,0 +1,42 @@
+{
+ "card_numbers": [],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "",
+   "amount": -12.0,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "SOMETHING",
+   "reference": "",
+   "source_amount": 12.0
+  },
+  {
+   "account": "",
+   "amount": -13.0,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-03",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "OTHER",
+   "reference": "",
+   "source_amount": 13.0
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_positive",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [],
+ "suggested_last4": null
+}

@@ -1,0 +1,22 @@
+{
+ "bank_rows": [
+  {
+   "amount": 2478.3,
+   "bank_description": "PAYROLL EXAMPLE CORP DIR DEP",
+   "check_number": null,
+   "date": "2026-10-01"
+  },
+  {
+   "amount": -120.0,
+   "bank_description": "CHECK # 1001",
+   "check_number": "1001",
+   "date": "2026-10-02"
+  },
+  {
+   "amount": -1045.12,
+   "bank_description": "GROCERY STORE SPRINGFIELD IL",
+   "check_number": null,
+   "date": "2026-10-03"
+  }
+ ]
+}

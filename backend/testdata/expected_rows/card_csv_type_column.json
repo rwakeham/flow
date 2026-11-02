@@ -1,0 +1,42 @@
+{
+ "card_numbers": [],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "",
+   "amount": -6.25,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "Food & Drink",
+   "issuer_type": "Sale",
+   "post_date": "2026-10-03",
+   "raw_description": "STARBUCKS 123",
+   "reference": "",
+   "source_amount": -6.25
+  },
+  {
+   "account": "",
+   "amount": 250.0,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-05",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "Payment",
+   "post_date": "2026-10-05",
+   "raw_description": "Payment Thank You-Mobile",
+   "reference": "",
+   "source_amount": 250.0
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_negative",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [],
+ "suggested_last4": null
+}

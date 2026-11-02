@@ -1,0 +1,16 @@
+{
+ "bank_rows": [
+  {
+   "amount": 2478.3,
+   "bank_description": "PAYROLL EXAMPLE CORP",
+   "check_number": null,
+   "date": "2026-10-01"
+  },
+  {
+   "amount": -75.0,
+   "bank_description": "CHECK # 1002 \"MEMO\"",
+   "check_number": "1002",
+   "date": "2026-10-02"
+  }
+ ]
+}

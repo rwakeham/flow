@@ -1,0 +1,42 @@
+{
+ "card_numbers": [],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "",
+   "amount": -12.5,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "CHIPOTLE 1234 SPRINGFIELD IL",
+   "reference": "",
+   "source_amount": -12.5
+  },
+  {
+   "account": "",
+   "amount": -4.0,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-03",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "CORNER COFFEE",
+   "reference": "",
+   "source_amount": -4.0
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_negative",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [],
+ "suggested_last4": null
+}

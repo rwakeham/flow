@@ -1,0 +1,27 @@
+{
+ "card_numbers": [],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "",
+   "amount": -54.1,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "Supermarkets",
+   "issuer_type": "",
+   "post_date": "2026-10-03",
+   "raw_description": "KROGER #123",
+   "reference": "",
+   "source_amount": 54.1
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_positive",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [],
+ "suggested_last4": null
+}

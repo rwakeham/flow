@@ -1,0 +1,42 @@
+{
+ "card_numbers": [],
+ "pending_dropped": 1,
+ "rows": [
+  {
+   "account": "",
+   "amount": -38.8,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-21",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "CIRCLEK#1000001 SPRINGFIELD IL",
+   "reference": "",
+   "source_amount": -38.8
+  },
+  {
+   "account": "",
+   "amount": -302.14,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-20",
+   "extended": "",
+   "issuer_category": "",
+   "issuer_type": "",
+   "post_date": null,
+   "raw_description": "TARGET T-0001 SPRINGFIELD IL",
+   "reference": "",
+   "source_amount": -302.14
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "charges_negative",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [],
+ "suggested_last4": null
+}

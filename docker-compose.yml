@@ -1,0 +1,62 @@
+services:
+  db:
+    # Pinned to the multi-platform index digest. Keep backups-owner's image the same. Never move
+    # to another major version here: a 17 server can't open a 16 data directory.
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: flow
+      POSTGRES_USER: flow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-off: hands the backup volume to the app's unprivileged user (uid 10001).
+  # Volumes created by earlier versions, whose app ran as root, are root-owned.
+  backups-owner:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    user: root
+    entrypoint: ["chown", "-R", "10001:10001", "/backups"]
+    restart: "no"
+    volumes:
+      - backupdata:/backups
+
+  app:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      backups-owner:
+        condition: service_completed_successfully
+    environment:
+      # The password is passed on its own (backend/database.py adds it to the URL), so any
+      # character in it works: inside the URL, @ / : # ? % would break the address.
+      DATABASE_URL: postgresql+psycopg2://flow@db:5432/flow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      FLOW_PASSWORD: ${FLOW_PASSWORD:-}
+      SECRET_KEY: ${SECRET_KEY}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FLOW_TRUSTED_PROXIES: ${FLOW_TRUSTED_PROXIES:-}
+      FLOW_RECURRING_SUBSTREAMS: ${FLOW_RECURRING_SUBSTREAMS:-1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Blank means the default in backend/card_ai.py (DEFAULT_MODEL).
+      FLOW_AI_MODEL: ${FLOW_AI_MODEL:-}
+      FLOW_AI_MODEL_CATEGORIZE: ${FLOW_AI_MODEL_CATEGORIZE:-}
+      FLOW_AI_MODEL_ASK: ${FLOW_AI_MODEL_ASK:-}
+      FLOW_AI_ENABLED: ${FLOW_AI_ENABLED:-1}
+      FLOW_AI_REDACT: ${FLOW_AI_REDACT:-}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./frontend:/app/frontend:ro
+      - backupdata:/backups
+
+volumes:
+  pgdata:
+  backupdata:

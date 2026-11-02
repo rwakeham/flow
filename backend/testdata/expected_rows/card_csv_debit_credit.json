@@ -1,0 +1,44 @@
+{
+ "card_numbers": [
+  "1234"
+ ],
+ "pending_dropped": 0,
+ "rows": [
+  {
+   "account": "1234",
+   "amount": -41.2,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-02",
+   "extended": "",
+   "issuer_category": "Gas/Automotive",
+   "issuer_type": "",
+   "post_date": "2026-10-03",
+   "raw_description": "SHELL OIL 57444",
+   "reference": "",
+   "source_amount": 41.2
+  },
+  {
+   "account": "1234",
+   "amount": 19.99,
+   "cardholder": "",
+   "city_state": "",
+   "country": "",
+   "date": "2026-10-04",
+   "extended": "",
+   "issuer_category": "Merchandise",
+   "issuer_type": "",
+   "post_date": "2026-10-04",
+   "raw_description": "REFUND AMAZON",
+   "reference": "",
+   "source_amount": -19.99
+  }
+ ],
+ "rows_skipped": 0,
+ "sign_convention": "debit_credit_columns",
+ "statement_end": null,
+ "statement_start": null,
+ "suggested_cardholders": [],
+ "suggested_last4": "1234"
+}

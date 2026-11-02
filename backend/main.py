@@ -10,6 +10,7 @@ from sqlalchemy import text
 import asyncio
 import json
 import logging
+import os
 
 from auth import (
     COOKIE_NAME,
@@ -30,6 +31,8 @@ from auth import (
     verify_password,
 )
 import asset_versions
+import backup_service
+import change_log
 import import_profile
 import settings_store
 import update_check
@@ -307,7 +310,8 @@ app.include_router(cashflow.router)
 app.include_router(import_profiles.router)
 app.include_router(ai.router)
 app.include_router(updates.router)
-FRONTEND_DIR = "/app/frontend"
+# The container's path; FLOW_FRONTEND_DIR lets a test import this module against the repository's frontend/.
+FRONTEND_DIR = os.environ.get("FLOW_FRONTEND_DIR") or "/app/frontend"
 NO_CACHE = "no-cache"          # keep a copy, but check it (ETag) before every use
 
 

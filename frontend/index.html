@@ -2044,7 +2044,7 @@ function renderNwChart() {
     nwVals = idx(netWorth); assetVals = idx(totalAssets); liabVals = idx(totalLiabs.map(Math.abs));
     yFmt = v => fmtPct(v);
   }
-  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(periodLabel);
   const opts = baseOpts(yFmt);
   opts.scales.x.ticks.maxRotation = 40;
   charts['chart-nw'] = new Chart(document.getElementById('chart-nw'), {
@@ -2092,7 +2092,7 @@ function renderDtaChart() {
     dd.className = 'card-delta ' + (delta > 0 ? 'delta-down' : 'delta-up');
   }
   const pointColors = dta.map((v, i) => i === 0 ? TICK : (v <= dta[i-1] ? '#22c55e' : '#ef4444'));
-  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(periodLabel);
   const mn = Math.min(...dta), mx = Math.max(...dta);
   destroyChart('chart-dta');
   charts['chart-dta'] = new Chart(document.getElementById('chart-dta'), {
@@ -2142,7 +2142,7 @@ function renderMomChart() {
 // ── Assets tab chart ──────────────────────────────────────────────────────────
 function renderAssetsChart() {
   const { assets, periods } = deriveSeries();
-  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(periodLabel);
   const legend = document.getElementById('legend-assets');
   legend.innerHTML = assets.map((a, i) =>
     `<div class="legend-item"><div class="legend-dot" style="background:${ASSET_COLORS[i % ASSET_COLORS.length]}"></div>${escHtml(a.name)}${a.cash ? ' <span style="font-size:10px;color:var(--text-muted)">(Cash)</span>' : ''}</div>`
@@ -2165,7 +2165,7 @@ function renderLiabChart() {
     destroyChart('chart-liab');
     return;
   }
-  const labels = periods.map(p => { const d = new Date(p); return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'}); });
+  const labels = periods.map(periodLabel);
   document.getElementById('legend-liab').innerHTML = liabs.map((a, i) =>
     `<div class="legend-item"><div class="legend-dot" style="background:${LIAB_COLORS[i % LIAB_COLORS.length]}"></div>${escHtml(a.name)}</div>`
   ).join('');
@@ -2250,12 +2250,26 @@ function fmtFull(v) {
   const sign = v < 0 ? '-' : '';
   return sign + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
+// Calendar dates ('YYYY-MM-DD', periods 'YYYY-MM-01') are local days. new Date('2026-10-01') is UTC
+// midnight, which is still Sep 30 anywhere west of UTC, so parse the parts instead; and toISOString()
+// gives the UTC date, not the user's, so format a local Date's own parts back.
+function parseLocalDate(s) {
+  const [y, m, d] = String(s).slice(0, 10).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+function localIso(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function periodLabel(p) {
+  return parseLocalDate(p).toLocaleDateString('en-US', {month:'short', year:'2-digit'});
+}
 function cfFmtDate(s) {
-  const d = new Date(s + 'T00:00:00');
+  const d = parseLocalDate(s);
   return (d.getMonth()+1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(-2);
 }
 function todayIso() {
-  return new Date().toISOString().slice(0,10);
+  return localIso(new Date());
 }
 
 // ── Register Accounts ─────────────────────────────────────────────────────────

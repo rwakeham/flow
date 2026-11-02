@@ -200,9 +200,6 @@ def test_docs_tests_and_ci_alone_are_a_patch():
     assert all(R.commit_level(c)[0] == "none" for c in commits)
     n = R.next_release("3.1.0", ["v3.1.0"], commits)
     assert (n.version, n.level) == ("3.1.1", "patch")
-    # ... and marked trivial, so a push to main doesn't release until something user-facing lands.
-    assert n.trivial and "trivial=true" in n.lines()
-    assert not R.next_release("3.1.0", ["v3.1.0"], commits + [_c("Fix a thing")]).trivial
 
 
 def test_a_chosen_level_overrides_auto():

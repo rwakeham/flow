@@ -157,14 +157,11 @@ class Next:
     level: str             # initial | manual | patch | minor | major
     previous: str          # the latest release tag, "" for the first
     reasons: list[str]     # one line per commit that decided the level
-    trivial: bool = False  # only docs, tests or CI changed since the last release: an automatic
-                           # release waits for a user-facing change; a manual one is a patch
 
     def lines(self) -> list[str]:
         return [f"current={self.current}", f"version={self.version}", f"tag=v{self.version}",
                 f"level={self.level}", f"previous={self.previous}",
-                f"bumped={'true' if self.version != self.current else 'false'}",
-                f"trivial={'true' if self.trivial else 'false'}"]
+                f"bumped={'true' if self.version != self.current else 'false'}"]
 
 
 def next_release(version_text: str, tags: list[str], commits: list[Commit], requested: str = "auto") -> Next:
@@ -195,7 +192,7 @@ def next_release(version_text: str, tags: list[str], commits: list[Commit], requ
     reasons = [f"{lvl}: {c.subject} ({why})" for c, lvl, why in judged if lvl == top]
     if top == "none":
         reasons = ["patch: only docs, tests or CI changed since " + latest]
-    return Next(current, bump(current, level), level, latest, reasons, trivial=top == "none")
+    return Next(current, bump(current, level), level, latest, reasons)
 
 
 def commits_since(tag: str, ref: str = "HEAD") -> list[Commit]:

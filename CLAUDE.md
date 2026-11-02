@@ -610,8 +610,7 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
   - otherwise `BREAKING CHANGE:` in the body (or a subject starting "Breaking") means major, a
     change touching only docs, tests or CI means none, a subject starting Add / Introduce / New /
     Support / Enable / Allow means minor, and anything else patch;
-  - the release takes the highest. A push that changed only docs, tests or CI (`trivial`) is not
-    released on its own: it goes out with the next user-facing change, or as a patch from a manual run.
+  - the release takes the highest, and a push that changed only docs, tests or CI is released as a patch.
 - **A release is a tag on `main`**: the run for a push to `main` (`release.yml`, after the tests)
   commits the bump to `backend/VERSION` as `Release <version>`, tags that commit `v<version>` with the
   notes (the commit subjects since the previous release, merges and the bump left out; pull request

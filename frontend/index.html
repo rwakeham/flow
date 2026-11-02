@@ -2153,7 +2153,7 @@ function renderAttention(items, hidden = []) {
   count.classList.toggle('hidden', !(collapsed && items.length));
   const row = i => `<div class="attention-item"><button type="button" class="attention-row" onclick="askNavigate(${escHtml(JSON.stringify(i.nav || null))})">
       <span class="acct-behind-count">${Number(i.count) || 0}</span><span>${escHtml(String(i.text))}</span><span class="go">open →</span></button>
-      <button type="button" class="attention-snooze" title="Remind me later or ignore" aria-haspopup="true" onclick="attentionMenu(event, ${escHtml(JSON.stringify(String(i.key || i.kind)))})">⏾ ▾</button></div>`;
+      <button type="button" class="attention-snooze" title="Remind me later or ignore" aria-haspopup="true" onclick="attentionMenu(event, ${escHtml(JSON.stringify(String(i.key || i.kind)))})">Later ▾</button></div>`;
   const hiddenRow = i => `<div class="attention-item muted"><span class="attention-row" style="cursor:default"><span class="acct-behind-count">${Number(i.count) || 0}</span><span>${escHtml(String(i.text))}</span>
       <span class="go">${i.snoozed_until ? 'until ' + escHtml(periodLabelDay(i.snoozed_until)) : 'until it changes'}</span></span>
       <button type="button" class="attention-snooze" onclick="attentionUnsnooze(${escHtml(JSON.stringify(String(i.key || i.kind)))})">Show again</button></div>`;

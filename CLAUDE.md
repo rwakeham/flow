@@ -174,6 +174,10 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   In an inline handler, pass a string as `escHtml(JSON.stringify(value))`: escaping only `"`
   lets `&quot;` in the data close the string.
   Render user text with `escHtml` (or `textContent`) in every template string.
+  Dates (`YYYY-MM-DD`, periods `YYYY-MM-01`) are local calendar days: parse them with index.html's
+  `parseLocalDate` (never `new Date('2026-10-01')`, which is UTC midnight, the day before west of UTC),
+  label a period with `periodLabel`, and turn a local `Date` back into a string with `localIso` (never
+  `toISOString()`, the UTC date); `todayIso()` is the user's today.
   Request bodies are capped by `body_limit.BodyLimit` (12 MB; the bulk import plan
   `MAX_BATCH_FILES` x 10 MB): a declared oversize `Content-Length` is refused with 413 before
   it is read, a chunked body once it passes the limit. Those limits are for a signed-in browser:

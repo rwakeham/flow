@@ -32,11 +32,11 @@ const cfwMoney = v => (v < 0 ? '-$' : '$') + Math.round(Math.abs(v)).toLocaleStr
 
 // ── Period ────────────────────────────────────────────────────────────────────
 function cfwRange() {
-  const iso = d => d.toISOString().slice(0, 10);
+  const iso = localIso;
   const today = new Date();
-  const monthStart = (y, m) => new Date(Date.UTC(y, m, 1));
+  const monthStart = (y, m) => new Date(y, m, 1);
   const y = today.getFullYear(), m = today.getMonth();
-  const endOfLast = new Date(Date.UTC(y, m, 0));
+  const endOfLast = new Date(y, m, 0);
   switch (CFW.period) {
     case '1m': return {start: iso(monthStart(y, m - 1)), end: iso(endOfLast)};
     case 'this': return {start: iso(monthStart(y, m)), end: iso(today)};
@@ -385,8 +385,7 @@ async function cfwShowList(spec) {
   if (!spec.quiet) box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 function cfwFmtDay(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+  return parseLocalDate(iso).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
 }
 const cfwMoney2 = v => (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 

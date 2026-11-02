@@ -512,7 +512,7 @@ async function _ipPreview() {
   }
   if (_ipNeedsDateAnswer(d)) {
     const r = d.rows.find(x => x.date);
-    const read = r ? new Date(r.date + 'T00:00:00').toLocaleDateString('en-US', {day: 'numeric', month: 'long', year: 'numeric'}) : '';
+    const read = r ? parseLocalDate(r.date).toLocaleDateString('en-US', {day: 'numeric', month: 'long', year: 'numeric'}) : '';
     question += `<div class="ip-question">Every date in this file could be month first or day first.${r ? ` Flow reads the first one${r.description ? ` (“${escHtml(r.description)}”)` : ''} as <b>${escHtml(read)}</b>.` : ''} Which order does the file use?
       <button class="btn-sm" onclick="ipAnswerDates('MDY')">Month first (03/04 = Mar 4)</button>
       <button class="btn-sm" onclick="ipAnswerDates('DMY')">Day first (03/04 = 3 Apr)</button></div>`;

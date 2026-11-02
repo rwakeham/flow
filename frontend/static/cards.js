@@ -239,7 +239,7 @@ function cdTfClear() {
 
 function cdPeriod() {
   const v = document.getElementById('cd-period').value;
-  const iso = d => d.toISOString().slice(0, 10);
+  const iso = localIso;
   const today = new Date();
   const back = days => { const d = new Date(); d.setDate(d.getDate() - days); return iso(d); };
   if (v === '30d') return {from: back(30), to: iso(today)};
@@ -595,8 +595,7 @@ async function cdRenderOverview(panel) {
 }
 
 function cdMonthLabel(m) {
-  const d = new Date(m + '-01T00:00:00');
-  return d.toLocaleDateString('en-US', {month: 'short', year: '2-digit'});
+  return periodLabel(m + '-01');
 }
 function cdStackOpts() {
   return {

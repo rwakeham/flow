@@ -68,6 +68,8 @@ def restore_backup(backup_id: str, db: Session = Depends(get_db)):
     import settings_store
     card_taxonomy.refresh(db)            # the restored custom categories
     settings_store.load(db)              # the restored AI settings (secrets aren't in a backup)
+    import update_check
+    update_check.load(db)                # the restored update-check result and hidden release
     return {"ok": True}
 
 

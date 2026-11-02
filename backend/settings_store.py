@@ -4,7 +4,8 @@ Flow's own settings and secrets, kept in the database rather than in .env.
 Two kinds of value:
 
 * **Settings** (``flow_settings`` rows; they travel in backups): the AI models, whether AI
-  calls are on, the extra words stripped from merchant names. Changed in the AI dialog.
+  calls are on, the extra words stripped from merchant names (changed in the AI dialog), and
+  whether the daily update check runs (Sign out ▾).
 * **Secrets** (``flow_secrets`` rows; never in a backup): the dashboard password as a
   scrypt hash (nothing ever needs it back, only to check it) and the Anthropic API key,
   encrypted with AES-GCM under a key derived from SECRET_KEY. SECRET_KEY stays in .env
@@ -44,12 +45,14 @@ AI_MODEL_CATEGORIZE = "ai_model_categorize"
 AI_MODEL_ASK = "ai_model_ask"
 AI_ENABLED = "ai_enabled"
 AI_REDACT = "ai_redact"
+UPDATE_CHECK = "update_check"
 SETTING_ENV = {
     AI_MODEL: "FLOW_AI_MODEL",
     AI_MODEL_CATEGORIZE: "FLOW_AI_MODEL_CATEGORIZE",
     AI_MODEL_ASK: "FLOW_AI_MODEL_ASK",
     AI_ENABLED: "FLOW_AI_ENABLED",
     AI_REDACT: "FLOW_AI_REDACT",
+    UPDATE_CHECK: "FLOW_UPDATE_CHECK",
 }
 MODEL_SETTINGS = (AI_MODEL, AI_MODEL_CATEGORIZE, AI_MODEL_ASK)
 
@@ -85,6 +88,11 @@ def setting_source(key: str) -> str | None:
 def ai_enabled_flag() -> bool:
     v = setting(AI_ENABLED).lower()
     return v not in OFF_WORDS
+
+
+def update_check_flag() -> bool:
+    """Whether the daily release check runs: on unless switched off (update_check.py)."""
+    return setting(UPDATE_CHECK).lower() not in OFF_WORDS
 
 
 def redact_words() -> list[str]:

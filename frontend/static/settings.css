@@ -16,6 +16,7 @@
 .settings-body h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 .settings-body code { font-size: 12px; }
 .settings-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.settings-row.hidden { display: none; }      /* index.html's .hidden alone loses to the flex rule above */
 .settings-filebtn { cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; }
 .settings-form { max-width: 420px; }
 #settings-updates .sub { display: block; font-size: 12px; color: var(--text-muted); margin-top: 4px; }

@@ -185,6 +185,11 @@ button:hover { background: var(--surface2); }
 [data-theme="dark"] .badge-register { background: #1e3a5f; color: #93c5fd; }
 .acct-row select { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-size: 12px; }
 .acct-row.ignored { opacity: 0.45; }
+.acct-latest { font-size: 12px; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.acct-latest.behind { color: #b45309; font-weight: 600; }
+[data-theme="dark"] .acct-latest.behind { color: #fbbf24; }
+.acct-behind-count { display: inline-block; white-space: nowrap; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: #fef3c7; color: #92400e; }
+[data-theme="dark"] .acct-behind-count { background: #451a03; color: #fcd34d; }
 .ignore-btn { padding: 3px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .ignore-btn.active { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
 [data-theme="dark"] .ignore-btn.active { background: #451a03; color: #fcd34d; border-color: #92400e; }
@@ -337,6 +342,8 @@ button:hover { background: var(--surface2); }
   .chart-wrap { height: 220px !important; }
   .acct-row { flex-wrap: wrap; }
   .acct-name { flex: 1 1 100%; }
+  #acct-head { flex-wrap: wrap; padding-bottom: 10px; }
+  #acct-toggle + button { margin-left: 16px; }
 
   /* Modals — fit the viewport rather than overflow it. */
   #unified-import-modal, #add-txn-modal,
@@ -799,7 +806,7 @@ button:hover { background: var(--surface2); }
 
   <!-- Account manager -->
   <div id="acct-panel">
-    <div style="display:flex;align-items:center;gap:8px">
+    <div id="acct-head" style="display:flex;align-items:center;gap:8px">
       <button id="acct-toggle" onclick="toggleAcctPanel()">▸ Manage Accounts</button>
       <button class="btn-sm" onclick="balOpenAccount()" style="white-space:nowrap">+ New balance account</button>
       <button class="btn-primary btn-sm" onclick="balOpen()" style="white-space:nowrap;margin-right:10px">Update balances</button>
@@ -1853,10 +1860,37 @@ function switchTab(name, btn) {
 
 // ── Account panel ─────────────────────────────────────────────────────────────
 function toggleAcctPanel() {
-  const b = document.getElementById('acct-body');
-  const t = document.getElementById('acct-toggle');
-  b.classList.toggle('open');
-  t.textContent = b.classList.contains('open') ? '▾ Manage Accounts' : '▸ Manage Accounts';
+  document.getElementById('acct-body').classList.toggle('open');
+  acctToggleLabel();
+}
+// The panel header: the arrow, and how many accounts still need this month's data (seen while closed).
+function acctToggleLabel() {
+  const open = document.getElementById('acct-body').classList.contains('open');
+  const behind = accounts.filter(a => a.behind && !a.ignored && !a.archived).length
+    + cfAccounts.filter(a => a.behind).length;
+  const month = new Date().toLocaleDateString('en-US', {month: 'long'});
+  document.getElementById('acct-toggle').innerHTML = (open ? '▾' : '▸') + ' Manage Accounts'
+    + (behind ? ` <span class="acct-behind-count" title="Balance accounts with no ${month} balance yet, and cash accounts with nothing in the last ${ACCT_REGISTER_BEHIND_DAYS} days">${behind} not updated for ${month}</span>` : '');
+}
+const ACCT_REGISTER_BEHIND_DAYS = 40;   // routers/register.REGISTER_BEHIND_DAYS
+const acctMonth = s => parseLocalDate(s).toLocaleDateString('en-US', {month: 'short', year: 'numeric'});
+const acctDay = s => parseLocalDate(s).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+// The newest data an account holds, flagged when it is behind (not for ignored or archived accounts).
+function acctLatest(a) {
+  const flag = a.behind && !a.ignored && !a.archived;
+  const l = a.latest;
+  const text = l ? `${acctMonth(l.period)} · ${fmtFull(l.amount)}` : 'No balance yet';
+  const tip = (l ? `Latest balance: ${acctMonth(l.period)}` + (l.updated_at ? `, entered ${new Date(l.updated_at).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})}` : '') : 'No balance entered yet')
+    + (flag ? `. Nothing for ${new Date().toLocaleDateString('en-US', {month: 'long'})} yet: Update balances.` : '');
+  return `<span class="acct-latest${flag ? ' behind' : ''}" title="${escHtml(tip)}">${flag ? '⚠ ' : ''}${escHtml(text)}</span>`;
+}
+function acctRegisterLatest(a) {
+  const text = a.latest_date ? `through ${acctDay(a.latest_date)}` : 'No transactions yet';
+  const tip = a.latest_date
+    ? (a.latest_source === 'bank' ? 'Newest bank-imported row' : 'Newest entry (no bank rows imported yet)') + `: ${acctDay(a.latest_date)}`
+      + (a.behind ? `. More than ${ACCT_REGISTER_BEHIND_DAYS} days old: import a recent statement.` : '')
+    : 'Nothing entered or imported yet';
+  return `<span class="acct-latest${a.behind ? ' behind' : ''}" title="${escHtml(tip)}">${a.behind ? '⚠ ' : ''}${escHtml(text)}</span>`;
 }
 async function patchIgnore(id, ignored) {
   await fetch('/api/accounts/' + id, {
@@ -1871,12 +1905,14 @@ function renderAccounts() {
 
   if (!accounts.length && !cfAccounts.length) {
     el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No accounts yet. Add a balance-sheet account (+ New balance account) or import a bank file to get started.</div>';
+    acctToggleLabel();
     return;
   }
 
   html += accounts.map(a => `
     <div class="acct-row${a.ignored || a.archived ? ' ignored' : ''}">
       <span class="acct-name">${escHtml(a.name)}${(a.last4 || []).map(n => ` <span class="acct-num">…${escHtml(n)}</span>`).join('')}${a.archived ? ' <span style="font-size:10px;color:var(--text-muted)">archived</span>' : ''}</span>
+      ${acctLatest(a)}
       <span class="badge badge-${a.account_type}">${a.account_type}</span>
       <button class="ignore-btn${a.ignored ? ' active' : ''}" onclick="patchIgnore(${a.id}, ${!a.ignored})">${a.ignored ? 'ignored' : 'ignore'}</button>
       <button onclick="balOpenAccount(${a.id})" style="font-size:11px;padding:3px 8px">Edit</button>
@@ -1887,6 +1923,7 @@ function renderAccounts() {
     html += cfAccounts.map(a => `
       <div class="acct-row">
         <span class="acct-name">${escHtml(a.name)}</span>
+        ${acctRegisterLatest(a)}
         <span class="badge badge-register">register</span>
         <span style="font-size:12px;color:var(--text-muted);margin-left:auto">${fmtFull(a.current_balance)}</span>
         <button onclick="openRegisterAccount(${a.id})" style="font-size:11px;padding:3px 8px">Open →</button>
@@ -1894,6 +1931,7 @@ function renderAccounts() {
   }
 
   el.innerHTML = html;
+  acctToggleLabel();
 }
 
 // ── Chart helpers ─────────────────────────────────────────────────────────────
@@ -1916,8 +1954,8 @@ async function loadAll() {
   const [sumRes, tsRes, acctRes, regRes, regTsRes] = await Promise.all([
     fetch('/api/data/summary'),
     fetch('/api/data/timeseries'),
-    fetch('/api/accounts'),
-    fetch('/api/register/accounts'),
+    fetch('/api/accounts', {headers: {'X-Flow-Today': todayIso()}}),
+    fetch('/api/register/accounts', {headers: {'X-Flow-Today': todayIso()}}),
     fetch('/api/register/accounts/timeseries'),
   ]);
   if (sumRes.status === 401 || tsRes.status === 401) {

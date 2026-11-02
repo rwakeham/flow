@@ -316,7 +316,7 @@ Before anything is saved, the preview shows each value next to the previous one 
 
 **Read with AI** is offered when neither the markers nor the reader find everything. Only an outline is sent: every amount and account number is replaced by a token, and every word outside a small banking vocabulary (names, institutions) by `~`. The model only says which amount goes with which account; Flow puts the real values back. The dialog shows exactly what would be sent, and each request is logged in the AI privacy log (**AI** in the top bar). Tick **Remember where this is** on an AI-read row and applying it saves a marker, so the next paste needs no AI.
 
-**Missing months:** an account you didn't update shows its last value (the Net Worth card says how many are carried) until you enter a new one. Archive a closed account so it stops carrying forward. Edit or delete any month from the account's **Edit** dialog under Manage Accounts.
+**Missing months:** an account you didn't update shows its last value (the Net Worth card says how many are carried) until you enter a new one. Archive a closed account so it stops carrying forward. Edit or delete any month from the account's **Edit** dialog under Manage Accounts. Manage Accounts shows each account's latest month and balance (and each cash account's newest transaction) and flags, even while collapsed, the accounts with nothing for this month yet (a cash account: nothing in the last 40 days).
 
 ## Import formats
 

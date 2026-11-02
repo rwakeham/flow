@@ -10,12 +10,13 @@ from calendar import monthrange
 from collections import Counter
 from datetime import date as DateType
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from auth import require_auth
+import balance_sheet
 from backup_service import ensure_daily_backup
 from database import get_db
 import import_profile_resolve
@@ -335,8 +336,13 @@ def register_accounts_timeseries(db: Session = Depends(get_db)):
     return {"periods": periods, "accounts": result_accounts}
 
 
+# Manage Accounts flags a cash account whose newest row is older than this: a monthly statement
+# imported a few days after it closes stays unflagged until the next one is due.
+REGISTER_BEHIND_DAYS = 40
+
+
 @router.get("/accounts")
-def list_register_accounts(db: Session = Depends(get_db)):
+def list_register_accounts(x_flow_today: str | None = Header(None), db: Session = Depends(get_db)):
     accounts = db.query(RegisterAccount).order_by(RegisterAccount.id).all()
     if not accounts:
         return []
@@ -356,10 +362,23 @@ def list_register_accounts(db: Session = Depends(get_db)):
     """)).fetchall()
     sums: dict[int, float] = {row[0]: float(row[1]) for row in sum_rows}
 
+    # Newest data per account: the latest bank-imported row, else the latest entry of any kind.
+    latest = {aid: (bank, any_) for aid, bank, any_ in db.execute(text("""
+        SELECT register_account_id, MAX(date) FILTER (WHERE source = 'bank'), MAX(date)
+          FROM transactions GROUP BY register_account_id
+    """)).fetchall()}
+    today = balance_sheet.client_today(x_flow_today, DateType.today())
+
     result = []
     for acct in accounts:
         opening, _ = _effective_opening(acct)
-        result.append(_acct_dict(acct, opening + sums.get(acct.id, 0.0)))
+        row = _acct_dict(acct, opening + sums.get(acct.id, 0.0))
+        bank, any_ = latest.get(acct.id, (None, None))
+        newest = bank or any_
+        row["latest_date"] = newest.isoformat() if newest else None
+        row["latest_source"] = ("bank" if bank else "manual") if newest else None
+        row["behind"] = newest is None or (today - newest).days > REGISTER_BEHIND_DAYS
+        result.append(row)
     return result
 
 

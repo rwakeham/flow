@@ -290,6 +290,17 @@ def test_plan_period_checks():
     assert bs.period_problem(bs.next_period(date(2026, 11, 1)), date(2026, 11, 1)) is None
 
 
+def test_an_account_is_behind_until_this_months_balance_is_in():
+    """Manage Accounts flags an account whose newest balance is for an earlier month, or that has none."""
+    today = date(2026, 11, 2)
+    assert bs.behind(date(2026, 10, 1), today)          # October's only: November is missing
+    assert bs.behind(None, today)                       # never updated
+    assert not bs.behind(date(2026, 11, 1), today)
+    assert not bs.behind(date(2026, 12, 1), today)      # a month-end snapshot filed as next month
+    # The user's date decides: Oct 31 evening in the US is Nov 1 on the server, October is still current.
+    assert not bs.behind(date(2026, 10, 1), bs.client_today("2026-10-31", date(2026, 11, 1)))
+
+
 def test_the_users_date_decides_the_period():
     """The server runs on UTC: on Oct 31 evening in the US it is already Nov 1 there."""
     server = date(2026, 11, 1)

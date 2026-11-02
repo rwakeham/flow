@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -82,8 +82,22 @@ def _check_alert(v: float | None) -> float | None:
 
 
 @router.get("/accounts")
-def list_accounts(db: Session = Depends(get_db)):
-    return [_account_json(a) for a in db.query(Account).order_by(Account.id).all()]
+def list_accounts(x_flow_today: str | None = Header(None), db: Session = Depends(get_db)):
+    """Every balance-sheet account, with its newest balance (``latest``) and whether this month's is
+    still missing (``behind``, by the user's date: X-Flow-Today)."""
+    today = balance_sheet.client_today(x_flow_today, date.today())
+    newest = {aid: (period, amount, updated) for aid, period, amount, updated in db.execute(text(
+        "SELECT DISTINCT ON (account_id) account_id, period, amount, updated_at"
+        "  FROM balances ORDER BY account_id, period DESC")).fetchall()}
+    out = []
+    for a in db.query(Account).order_by(Account.id).all():
+        row = _account_json(a)
+        n = newest.get(a.id)
+        row["latest"] = {"period": n[0].isoformat(), "amount": float(n[1]),
+                         "updated_at": n[2].isoformat() if n[2] else None} if n else None
+        row["behind"] = balance_sheet.behind(n[0] if n else None, today)
+        out.append(row)
+    return out
 
 
 @router.post("/accounts", status_code=201)

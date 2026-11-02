@@ -217,7 +217,10 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   (banks show them positive), change alerts vs the previous value (`flow_settings` global % and $, overridable per
   account; 0 turns one off), overwrites, older periods, duplicates, numbers on two accounts. `/apply` checks again.
   Missing months carry the last value forward (`carry_forward`, `routers/data.balance_matrix`; `carried` in the
-  timeseries, `carried_accounts` in the summary); archived accounts don't carry. The AI fallback is opt-in per
+  timeseries, `carried_accounts` in the summary); archived accounts don't carry. Manage Accounts shows each account's
+  newest balance (`/api/accounts` `latest`) and flags one with nothing for the user's month (`behind`,
+  `balance_sheet.behind`, by `X-Flow-Today`); a cash account is behind when its newest bank row (else any row) is
+  over `routers/register.REGISTER_BEHIND_DAYS` (40) old. The panel header counts them while collapsed. The AI fallback is opt-in per
   paste: `balance_sheet.outline` replaces amounts and account numbers with tokens and every word outside `VOCAB`
   with `~`; the model returns token pairs (`items_from_ai`), local readings stand (`merge_items`). Logged as
   `ai_request_log` purpose `balances`. Text pasted into the Assistant that looks like a summary opens this dialog

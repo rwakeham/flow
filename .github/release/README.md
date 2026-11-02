@@ -9,17 +9,17 @@ Flow is developed and released in this one repository. A release is a tag `v<ver
   Sign out ▾ and `deploy.sh` prints it. Nobody edits it by hand: the release run does.
 - **Every push to `main` releases**, once the tests pass: the version is worked out from the
   commits since the last release (below) and the release published. A push that changed only
-  docs, tests or CI is not released on its own; it goes out with the next user-facing change.
+  tests or CI is not released on its own; it goes out with the next user-facing change.
 - **A manual run** (**Actions → Release → Run workflow**, on `main`) does the same with inputs:
   - **Version bump**: `auto` (default) works it out from the commits since the last release;
-    `patch`, `minor` or `major` overrides that. A docs-only change becomes a patch here.
+    `patch`, `minor` or `major` overrides that. A tests or CI-only change becomes a patch here.
   - **Dry run**: work it all out and attach the preview, change nothing.
 - **What `auto` picks**, highest across the commits since the last release:
   - a `Release: major|minor|patch|none` trailer in a commit message decides for that commit;
   - else `BREAKING CHANGE:` in the body, or a subject starting "Breaking", is major;
-  - else a commit touching only docs, tests or `.github` is none;
+  - else a commit touching only tests, `.github` or CLAUDE.md is none, docs (README, `docs/`) a patch;
   - else a subject starting Add / Introduce / New / Support / Enable / Allow is minor;
-  - else patch. A release with only docs, tests or CI changes is a patch.
+  - else patch. A release with only tests or CI changes is a patch.
 
   The run summary lists the commits that decided it. The first release publishes
   `backend/VERSION` as it is, and a version already raised by hand above the last release is

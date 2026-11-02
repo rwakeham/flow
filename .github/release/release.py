@@ -114,7 +114,9 @@ TRAILER = re.compile(r"^Release:\s*(major|minor|patch|none)\s*$", re.I | re.M)
 BREAKING = re.compile(r"^BREAKING[ -]CHANGE\b|^Breaking:", re.M)
 FEATURE_VERBS = {"add", "adds", "introduce", "introduces", "new", "support", "supports", "enable", "allow"}
 # Paths whose changes alone don't change Flow for its users (they still ship, with the next change).
-NOT_USER_FACING = re.compile(r"^(docs/|tests/|\.github/|\.claude/|backend/test_[^/]*\.py$|backend/testdata/|[^/]*\.md$)")
+INTERNAL = re.compile(r"^(tests/|\.github/|\.claude/|backend/test_[^/]*\.py$|backend/testdata/|CLAUDE\.md$)")
+# Documentation users read: on its own it is released as a patch.
+DOCS = re.compile(r"^(docs/|[^/]*\.md$)")
 
 
 @dataclass
@@ -127,14 +129,16 @@ class Commit:
 
 def commit_level(c: Commit) -> tuple[str, str]:
     """(level, why) for one commit: a Release: trailer wins, then breaking-change markers,
-    then a docs/tests-only change (none), then the subject's first word (feature or fix)."""
+    then a docs-only change (patch) or tests/CI-only change (none), then the subject's first word (feature or fix)."""
     m = TRAILER.search(c.body)
     if m:
         return m.group(1).lower(), "Release: trailer"
     if BREAKING.search(c.body) or c.subject.lower().startswith("breaking"):
         return "major", "marked breaking"
-    if c.files and all(NOT_USER_FACING.match(f) for f in c.files):
-        return "none", "docs, tests or CI only"
+    if c.files and all(INTERNAL.match(f) or DOCS.match(f) for f in c.files):
+        if any(DOCS.match(f) and not INTERNAL.match(f) for f in c.files):
+            return "patch", "documentation"
+        return "none", "tests or CI only"
     first = (c.subject.split() or [""])[0].lower().rstrip(":,")
     if first in FEATURE_VERBS:
         return "minor", f"subject starts with {first.capitalize()!r}"
@@ -157,7 +161,7 @@ class Next:
     level: str             # initial | manual | patch | minor | major
     previous: str          # the latest release tag, "" for the first
     reasons: list[str]     # one line per commit that decided the level
-    trivial: bool = False  # only docs, tests or CI changed since the last release: an automatic
+    trivial: bool = False  # only tests or CI changed since the last release: an automatic
                            # release waits for a user-facing change; a manual one is a patch
 
     def lines(self) -> list[str]:
@@ -194,7 +198,7 @@ def next_release(version_text: str, tags: list[str], commits: list[Commit], requ
     level = top if top != "none" else "patch"     # a release asked for is at least a patch
     reasons = [f"{lvl}: {c.subject} ({why})" for c, lvl, why in judged if lvl == top]
     if top == "none":
-        reasons = ["patch: only docs, tests or CI changed since " + latest]
+        reasons = ["patch: only tests or CI changed since " + latest]
     return Next(current, bump(current, level), level, latest, reasons, trivial=top == "none")
 
 

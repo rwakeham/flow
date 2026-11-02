@@ -99,12 +99,17 @@ def _open(url: str, timeout: float) -> bytes:
 def fetch_latest(open_url=None) -> Release:
     """GitHub's latest release for this repository; raises CheckFailed with a short reason."""
     open_url = open_url or _open
+    # Each failure becomes fixed wording: an exception's own text (an OS error, a resolver
+    # message) is logged, never stored or shown.
     try:
         raw = open_url(API_URL, TIMEOUT)
     except urllib.error.HTTPError as exc:
-        raise CheckFailed(f"GitHub answered {exc.code}") from None
-    except (OSError, ValueError) as exc:           # URLError and timeouts are OSErrors
-        raise CheckFailed(str(exc) or exc.__class__.__name__) from None
+        raise CheckFailed(f"GitHub answered {int(exc.code)}") from None
+    except TimeoutError:
+        raise CheckFailed("GitHub didn't answer in time") from None
+    except (OSError, ValueError) as exc:           # URLError is an OSError
+        log.debug("update check: %s", exc)
+        raise CheckFailed("couldn't reach GitHub") from None
     try:
         data = json.loads(raw)
     except ValueError:

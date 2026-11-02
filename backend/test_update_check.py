@@ -67,10 +67,22 @@ def test_fetch_reads_the_reply_and_reports_failures_in_a_few_words():
     with pytest.raises(uc.CheckFailed, match="unexpected reply"):
         uc.fetch_latest(lambda url, timeout: reply({"tag_name": "nope"}))
 
+    # An exception's own text never gets through: each kind of failure has fixed wording.
     def no_route(url, timeout):
-        raise OSError("no route to host")
-    with pytest.raises(uc.CheckFailed, match="no route to host"):
+        raise OSError("[Errno -2] Name or service not known")
+    with pytest.raises(uc.CheckFailed, match="^couldn't reach GitHub$"):
         uc.fetch_latest(no_route)
+
+    def slow(url, timeout):
+        raise TimeoutError("timed out after 10.0s")
+    with pytest.raises(uc.CheckFailed, match="^GitHub didn't answer in time$"):
+        uc.fetch_latest(slow)
+
+    def rate_limited(url, timeout):
+        import urllib.error
+        raise urllib.error.HTTPError(url, 403, "rate limit exceeded for 203.0.113.9", {}, None)
+    with pytest.raises(uc.CheckFailed, match="^GitHub answered 403$"):
+        uc.fetch_latest(rate_limited)
 
 
 def test_a_check_stores_the_result_and_the_menu_shows_a_newer_release():
@@ -85,10 +97,11 @@ def test_a_check_stores_the_result_and_the_menu_shows_a_newer_release():
 
     # A failure keeps the release found last time, and says what went wrong.
     def down(url, timeout):
-        raise OSError("timed out")
+        raise OSError("connection reset by 203.0.113.9")
     ok, message = uc.run_check(db, down)
-    assert (ok, message) == (False, "Couldn't check for updates: timed out.")
-    assert uc.status()["update"]["version"] == "99.0.0" and uc.status()["error"] == "timed out"
+    assert (ok, message) == (False, "Couldn't check for updates: couldn't reach GitHub.")
+    assert uc.status()["update"]["version"] == "99.0.0" and uc.status()["error"] == "couldn't reach GitHub"
+    assert "203.0.113.9" not in json.dumps(uc.status())
 
     # The same version as the one running, or an older one, is no update.
     from version import APP_VERSION

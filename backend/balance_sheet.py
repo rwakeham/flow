@@ -56,6 +56,12 @@ def client_today(header: str | None, server_today: date) -> date:
     return d if abs((d - server_today).days) <= 1 else server_today
 
 
+def behind(latest: date | None, today: date) -> bool:
+    """Whether an account still needs this month's balance: its newest period is before ``today``'s
+    month, or it has none (Manage Accounts flags it). A month-end snapshot filed as next month counts."""
+    return latest is None or latest < current_period(today)
+
+
 def period_problem(period: date, today: date) -> str | None:
     """Why ``period`` can't be written, or None. Periods are the 1st of a month, at most next month."""
     if period.day != 1:

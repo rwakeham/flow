@@ -389,3 +389,17 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print("ok", name)
+
+
+def test_clean_label_stays_fast_on_a_very_long_line():
+    # _INSTITUTION_TAIL is quadratic in its input: a 60,000-character line of capitalized words
+    # took about 7 s through marker_label and the text before an account number. clean_label
+    # now scans at most LABEL_SCAN_CHARS, which changes nothing a bank page can produce.
+    import time
+    line = "Aa" + " Aa" * (bs.MAX_PASTE_CHARS // 3)
+    start = time.perf_counter()
+    assert bs.marker_label(line) == line[:80]
+    bs.extract(line[:bs.MAX_PASTE_CHARS - 30] + " ending in 1234 $1.00")
+    assert time.perf_counter() - start < 0.5
+    assert bs.clean_label("Checking Account, Example Bank N.A.") == "Checking Account"
+    assert bs.clean_label("* Savings Example Bank LLC") == ""

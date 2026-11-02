@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from sqlalchemy import text
 
+import asyncio
 import json
 import logging
 
@@ -31,13 +32,13 @@ from auth import (
 import asset_versions
 import import_profile
 import settings_store
+import update_check
 from body_limit import MB, BodyLimit, cookie_value, too_many_rows
 from security_headers import SameOrigin, SecurityHeaders
 import card_taxonomy
 from database import Base, SessionLocal, engine
 from models import REVOKED_SESSIONS_KEY, SESSION_EPOCH_KEY, AppSetting
-from routers import data, upload, register, backup, cards, ask, balances, cashflow, import_profiles, ai
-from version import APP_VERSION
+from routers import data, upload, register, backup, cards, ask, balances, cashflow, import_profiles, ai, updates
 
 log = logging.getLogger("flow")
 
@@ -166,6 +167,7 @@ async def lifespan(app: FastAPI):
             log.info("Copied %s from .env into Flow's settings; they can be removed from .env now "
                      "(./setup.sh offers to)", ", ".join(copied))
         require_password(settings_store.password_hash())
+        update_check.load(db)            # the last release check and the version the user hid
         # The merchant rules were made generic (every US airline and large hotel group its own
         # detail, no local names): stored charges follow the rules, and a merchant no rule
         # recognizes any more keeps its category as a remembered choice. After refresh, so
@@ -176,7 +178,11 @@ async def lifespan(app: FastAPI):
             card_rules_refresh.run(db)
             db.execute(text("INSERT INTO schema_migrations (name) VALUES (:name)"), {"name": "card_rules_generic_v1"})
             db.commit()
+    # The daily check for a newer release runs on its own (update_check.loop: two minutes after
+    # startup, then daily, skipped while the switch is off); cancelled at shutdown.
+    checker = asyncio.create_task(update_check.loop(SessionLocal))
     yield
+    checker.cancel()
 
 
 def _read_session_epoch(db) -> int:
@@ -289,6 +295,7 @@ app.include_router(balances.router)
 app.include_router(cashflow.router)
 app.include_router(import_profiles.router)
 app.include_router(ai.router)
+app.include_router(updates.router)
 FRONTEND_DIR = "/app/frontend"
 NO_CACHE = "no-cache"          # keep a copy, but check it (ETag) before every use
 
@@ -389,11 +396,8 @@ def health():
     return {"status": "ok"}
 
 
-# Signed in only: the health check stays bare, so an unauthenticated caller can't
-# read which version (and so which known fixes) a server runs.
-@app.get("/api/version", dependencies=[Depends(require_auth)])
-def get_version():
-    return {"version": APP_VERSION}
+# /api/version (signed in only, so the bare health check gives away no version) is
+# routers/updates.py: the running version and the update check.
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────

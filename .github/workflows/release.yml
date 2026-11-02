@@ -1,6 +1,7 @@
 # Every push to main releases: the run works out the next version from the commits since
 # the last release, privacy-checks the tree and the notes, commits the bump to
-# backend/VERSION, tags it v<version> with the notes and publishes the GitHub Release. A push
+# backend/VERSION (pushed to main with the RELEASE_DEPLOY_KEY deploy key, since main's ruleset
+# requires a pull request), tags it v<version> with the notes and publishes the GitHub Release. A push
 # that changed only tests or CI waits for the next user-facing change. A manual run
 # (Actions -> Release -> Run workflow, on main) does the same with a bump you pick, or a dry
 # run, and releases a docs-only change as a patch. See .github/release/README.md.
@@ -108,7 +109,10 @@ jobs:
           VERSION: ${{ steps.next.outputs.version }}
         run: |
           printf '%s\n' "$VERSION" > backend/VERSION
-          git -c "user.name=$BOT_NAME" -c "user.email=$BOT_EMAIL" commit --quiet -m "Release ${VERSION}" backend/VERSION
+          # [skip ci]: the bump is pushed with a deploy key, whose push starts workflows (the
+          # workflow token's would not), and the release that made it has nothing left to do.
+          git -c "user.name=$BOT_NAME" -c "user.email=$BOT_EMAIL" commit --quiet \
+            -m "Release ${VERSION}" -m "[skip ci]" backend/VERSION
 
       - name: Build the release notes and the tree to check
         if: steps.next.outputs.nothing != 'true'
@@ -139,11 +143,31 @@ jobs:
 
       # From here on, only a real release. The bump goes to main first: if main moved since
       # the run started, this push fails and nothing is published; the run for that later push
-      # (queued behind this one) releases both. A bump pushed with the workflow token starts no
-      # new run, so a release never triggers itself.
+      # (queued behind this one) releases both.
+      #
+      # main's ruleset requires a pull request, and GitHub offers no bypass for the workflow
+      # token on this repository, so the push is made over SSH with a write deploy key that IS
+      # on the ruleset's bypass list (Settings -> Deploy keys; the private half is the
+      # RELEASE_DEPLOY_KEY secret; Rulesets -> main -> Bypass list -> Deploy keys). The key is
+      # used for this one push and lives only in the runner's temp directory. GitHub's SSH host
+      # key is pinned below (https://docs.github.com/en/authentication/keychain-security/githubs-ssh-key-fingerprints).
       - name: Push the version bump to main
         if: steps.decide.outputs.publish == 'true' && steps.next.outputs.bumped == 'true'
-        run: git push origin HEAD:refs/heads/main
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RELEASE_DEPLOY_KEY" ]]; then
+            echo "::error::The RELEASE_DEPLOY_KEY secret is not set: the version bump can't be pushed to main (see this step's comment in release.yml)."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/ssh/known_hosts"
+          GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/ssh/key -o User=git -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts -o StrictHostKeyChecking=yes" \
+            git push "ssh://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/main
+          rm -rf "$RUNNER_TEMP/ssh"
 
       - name: Tag the release and publish it
         if: steps.decide.outputs.publish == 'true'

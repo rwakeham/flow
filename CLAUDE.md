@@ -23,6 +23,8 @@ backend/                — FastAPI application
   asset_versions.py       Content-hash ?v= on index.html's /static references (cache-busting)
   VERSION                 Flow's version, MAJOR.MINOR.PATCH: the only place it is written (see Releases)
   version.py              Reads VERSION (APP_VERSION; "unknown" if missing or malformed)
+  update_check.py         Daily check of GitHub's latest release against APP_VERSION: strict reply parsing and the
+                          comparison (pure), the stored result, the background loop
   settings_store.py       Settings (AI models, switch, redact words: flow_settings) and secrets (password hash,
                           encrypted API key: flow_secrets) in the database; .env wins while a variable is set
   reset_password.py       Host-side password reset: docker compose exec app python reset_password.py
@@ -71,6 +73,7 @@ backend/                — FastAPI application
     ask.py                /api/ask — Assistant chat (NDJSON stream), status and monthly question count
     backup.py             /api/backup
     ai.py                 /api/ai — the AI settings (key, switch, models, redact words: settings_store), the AI privacy log
+    updates.py            /api/version — the running version and the update check (check now, hide, the daily switch)
 tests/
   test_deploy_script.py   Behaviour tests for deploy.sh and setup.sh (deploys nothing)
 docs/screenshots/       README screenshots, taken from a demo install with synthetic data (no real data)
@@ -479,6 +482,21 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   again. One in-memory copy (`settings_store.load` at startup and after a backup restore), one worker.
   The AI dialog (`static/ai.js`, `routers/ai.py`) has the key (save, test, remove), the switch, the three
   models (datalist of known names, validated like `setup.sh` did) and the redact words.
+- **Update check** (`update_check.py`, `routers/updates.py`, the Sign out ▾ menu in `index.html`): a background
+  task started by the lifespan (`update_check.loop`; two minutes after startup, so the deploy's health check
+  comes first, then daily) does one GET to GitHub's latest-release endpoint for `update_check.REPO`, server-side
+  (the browser never calls out; the CSP stays closed) and with nothing of the user's. The reply is external data:
+  `parse_release` keeps only a `vMAJOR.MINOR.PATCH` tag, an `html_url` under the repository's releases page and
+  the date, at most `MAX_REPLY` bytes, and nothing from it is rendered as HTML. `is_newer` compares semver tuples
+  with `APP_VERSION`; a dev checkout ahead of the latest release is no update. The last result and the release
+  the user hid are `flow_settings` rows (`STATE_KEY`, `DISMISSED_KEY`, loaded by `update_check.load` at startup),
+  in memory between checks. `GET /api/version` returns `{version, update: status()}`; `POST /check` runs one now
+  whatever the switch says (a failure is shown only there: the daily check logs and tries tomorrow); `POST
+  /dismiss` hides a release until a newer one; `PUT /settings` is the daily switch (`flow_settings`
+  `update_check`, `SETTING_ENV` → `FLOW_UPDATE_CHECK`, refused with 409 while `.env` sets it). The menu shows a
+  dot on Sign out ▾ (fetched once after sign-in) and the version line with the release link, hide, and the switch.
+  Flow never installs an update: updating stays `git pull && ./deploy.sh`. README's "What leaves your machine"
+  describes the call; keep it in step.
 
 ## Key conventions
 
@@ -534,6 +552,7 @@ the proxy settings). For host state:
 | `FLOW_AI_MODEL_ASK` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for the Assistant's topic gate and answer rounds (`TASK_ASK`; `ai_model_ask`) |
 | `FLOW_AI_ENABLED` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn AI calls off even with a key set (the AI dialog's switch, `ai_enabled`) |
 | `FLOW_AI_REDACT` | *(empty)* | Comma-separated extra words stripped from merchant names before any AI call (the AI dialog's field, `ai_redact`) |
+| `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Sign out ▾ has the same switch, `update_check`) |
 
 `.env.example` lists the four user-facing variables (`POSTGRES_PASSWORD`, `FLOW_PASSWORD`,
 `SECRET_KEY` blank, so a copied file can't deploy as is; `APP_PORT`), plus the optional ones commented out.
@@ -541,7 +560,7 @@ the proxy settings). For host state:
 exists it is optional, offered as a reset, since Flow keeps the password itself), then offers the
 Anthropic API key (read hidden; `off` removes the line). The models, switch and redact words are the AI
 dialog's; `setup.sh` no longer asks for them. On a re-run with a database volume, `setup.sh` offers to
-remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY` and `FLOW_AI_*` still in `.env` that this run didn't
+remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*` and `FLOW_UPDATE_CHECK` still in `.env` that this run didn't
 just set (`_env_unset`), since Flow has copied them in. `deploy.sh` requires `POSTGRES_PASSWORD` and
 `SECRET_KEY`, requires `FLOW_PASSWORD` only before the first start (no `pgdata` volume by Compose's
 labels), and notes the values Flow keeps that are still set. `DATABASE_URL`, `COOKIE_SECURE`,
@@ -615,8 +634,10 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
 - **A release is a tag on `main`**: the run for a push to `main` (`release.yml`, after the tests)
   commits the bump to `backend/VERSION` as `Release <version>`, tags that commit `v<version>` with the
   notes (the commit subjects since the previous release, merges and the bump left out; pull request
-  numbers stay and link) and creates the GitHub Release from it. A bump pushed with the workflow token
-  starts no run, so a release never triggers itself. Actions → Release → Run workflow still works, for
+  numbers stay and link) and creates the GitHub Release from it. `main`'s ruleset requires a pull request
+  and offers no bypass for the workflow token, so the bump is pushed over SSH with a write deploy key on
+  the ruleset's bypass list (the `RELEASE_DEPLOY_KEY` secret; the release README has the setup); its push
+  would start a run, so the bump commit's body says `[skip ci]`. Actions → Release → Run workflow still works, for
   a chosen bump or a dry run. Every pull request runs the same steps as a preview, with the denylist
   required unless the pull request comes from a fork or Dependabot (no repository secrets there). The
   tool and its setup live in `.github/release/` (README there).

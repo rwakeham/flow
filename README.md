@@ -92,13 +92,14 @@ Change the password under **Sign out ▾ → Change password** and the AI settin
 **General**
 - Single-password authentication with session cookie
 - Dark mode support
-- Fully self-hosted: no accounts, telemetry or external services required (see [What leaves your machine](#what-leaves-your-machine))
+- Fully self-hosted: no accounts or telemetry, and the one call Flow makes on its own, a daily check for a newer release, can be switched off (see [What leaves your machine](#what-leaves-your-machine))
 
 ## What leaves your machine
 
 - **Nothing about your data, unless you turn on AI.** Without an Anthropic API key (entered under **AI** in the top bar, or by `setup.sh` for the first start), Flow makes no outside calls with your data. With a key, the AI features send what the privacy paragraph above describes to the Anthropic API, and every request and response is logged in the **AI privacy log** (**AI** in the top bar). The **AI calls on** switch there turns the calls off while keeping the key.
 - **No outside scripts.** The charting library (Chart.js, MIT) ships with Flow in `frontend/static/vendor`, so the browser loads everything from your server.
-- **Nothing else**: no analytics, no update checks, no error reporting.
+- **A daily check for a newer release.** Once a day Flow asks GitHub (`api.github.com`) for its latest release and, when it is newer than the one running, shows it under **Sign out ▾**: a dot on the button, and in the menu the version with a link to the release notes. Nothing about you or your data is sent; GitHub sees the request as it would any visit to the site, from your server's address. **Sign out ▾ → Check for updates** runs it by hand, and the same menu turns the daily check off (or set `FLOW_UPDATE_CHECK=0` in `.env`). Flow never installs an update itself: that stays `git pull && ./deploy.sh`.
+- **Nothing else**: no analytics, no error reporting.
 
 ## Security
 
@@ -119,7 +120,7 @@ Change the password under **Sign out ▾ → Change password** and the AI settin
 - **If the login lock trips on its own.** Failed logins are counted per client address. On Docker Desktop (Mac and Windows), and for connections that reach the container through Docker's userland proxy (IPv6, `localhost`), every device on your network can arrive from the same internal address, so five wrong passwords from any one of them lock everyone out for five minutes. Set `FLOW_TRUSTED_PROXIES` to that address range (for example `172.16.0.0/12`) only if a reverse proxy in front of Flow sends `X-Forwarded-For`; otherwise the lock simply clears itself after five minutes, and keeping Flow on a network you trust is the fix.
 - **Other web apps on the same host name.** Flow refuses a change request that the browser says came from another origin, including another port on the same host, so a page from another app on the machine can't act with your cookie. Reads need the password either way.
 - **Backups hold everything.** A backup zip (Backups in the top bar) contains all your data in plain JSON. Store downloads somewhere you'd keep bank statements.
-- **Updates.** `git pull && ./deploy.sh` (below). Security fixes land on `main`; see [SECURITY.md](SECURITY.md) to report a problem.
+- **Updates.** `git pull && ./deploy.sh` (below). Flow tells you under **Sign out ▾** when a newer release exists (the daily check above). Security fixes land on `main`; see [SECURITY.md](SECURITY.md) to report a problem.
 
 ## Scope and limits
 

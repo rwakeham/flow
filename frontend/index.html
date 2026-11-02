@@ -76,6 +76,12 @@ button:hover { background: var(--surface2); }
 .signout-menu .sub { display: block; font-size: 11px; color: var(--text-muted); }
 .signout-menu .app-version { font-size: 11px; color: var(--text-muted); padding: 6px 10px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
 .signout-menu .app-version:empty { display: none; }
+.signout-menu .app-version a { color: var(--accent); }
+.signout-menu .app-version button.link { display: inline; width: auto; padding: 0 2px; font-size: 11px;
+  color: var(--accent); text-decoration: underline; }
+.signout-menu .app-version code { font-size: 11px; }
+#signout-btn.has-update::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); margin-left: 6px; vertical-align: middle; }
 #topbar {
   background: var(--surface); border-bottom: 1px solid var(--border);
   display: flex; align-items: center; padding: 0 24px; height: 52px; gap: 12px;
@@ -713,6 +719,7 @@ button:hover { background: var(--surface2); }
       <button role="menuitem" onclick="doLogout()">Sign out</button>
       <button role="menuitem" onclick="doLogoutEverywhere()">Sign out everywhere<span class="sub">every browser and device, this one too</span></button>
       <button role="menuitem" onclick="openChangePassword()">Change password…<span class="sub">signs every browser out</span></button>
+      <button role="menuitem" onclick="checkForUpdates()" title="Asks GitHub for Flow's newest release now; nothing about your data is sent">Check for updates<span class="sub" id="update-check-sub"></span></button>
       <div id="app-version" class="app-version"></div>
     </div>
   </div>
@@ -1128,16 +1135,61 @@ function toggleSignoutMenu(ev) {
   const menu = document.getElementById('signout-menu');
   const open = menu.classList.toggle('hidden') === false;
   document.getElementById('signout-btn').setAttribute('aria-expanded', String(open));
-  if (open) showAppVersion();
+  if (open) loadVersionInfo();
 }
-// The running version (backend/VERSION), under the Sign out menu. Fetched when the menu opens.
-async function showAppVersion() {
-  const el = document.getElementById('app-version');
-  if (el.textContent) return;
+// The running version (backend/VERSION) and the update check, under the Sign out menu
+// (GET /api/version). Fetched when the menu opens, and once after sign-in for the dot on the
+// button that says a newer release is known.
+let _versionInfo = null;
+async function loadVersionInfo() {
   try {
     const res = await fetch('/api/version');
-    if (res.ok) el.textContent = 'Flow ' + ((await res.json()).version || 'unknown');
-  } catch (e) { /* offline: leave it blank */ }
+    if (res.ok) _versionInfo = await res.json();
+  } catch (e) { /* offline: keep what we have */ }
+  renderVersionInfo();
+}
+function renderVersionInfo() {
+  const v = _versionInfo, u = (v && v.update) || {};
+  document.getElementById('signout-btn').classList.toggle('has-update', !!u.update);
+  const el = document.getElementById('app-version');
+  if (!v) { el.textContent = ''; return; }
+  let html = 'Flow ' + escHtml(v.version || 'unknown');
+  if (u.update) {
+    html += ' · <a href="' + escHtml(u.update.url) + '" target="_blank" rel="noopener">' + escHtml(u.update.version) + ' available</a>'
+      + ' <button type="button" class="link" onclick="dismissUpdate(' + escHtml(JSON.stringify(u.update.version)) + ')" title="Hide this until the next release">hide</button>'
+      + '<span class="sub">Update: <code>git pull &amp;&amp; ./deploy.sh</code></span>';
+  }
+  if (u.source === 'env') {
+    html += '<span class="sub">Daily check ' + (u.enabled ? 'on' : 'off') + ', set by .env</span>';
+  } else {
+    html += '<span class="sub">' + (u.enabled ? 'Checks GitHub daily' : 'Daily check off')
+      + ' · <button type="button" class="link" onclick="toggleUpdateCheck()">turn ' + (u.enabled ? 'off' : 'on') + '</button></span>';
+  }
+  el.innerHTML = html;
+}
+// Sign out ▾ → Check for updates: one check now, whatever the daily switch says.
+async function checkForUpdates() {
+  const sub = document.getElementById('update-check-sub');
+  sub.textContent = 'Checking…';
+  try {
+    const res = await fetch('/api/version/check', {method: 'POST'});
+    const data = await res.json();
+    if (res.ok) _versionInfo = data;
+    sub.textContent = data.message || (res.ok ? '' : 'Could not check (' + res.status + ').');
+  } catch (e) { sub.textContent = 'Could not reach Flow.'; }
+  renderVersionInfo();
+}
+async function dismissUpdate(version) {
+  const res = await fetch('/api/version/dismiss', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                   body: JSON.stringify({version})});
+  if (res.ok) { _versionInfo = await res.json(); renderVersionInfo(); }
+}
+async function toggleUpdateCheck() {
+  const on = !(_versionInfo && _versionInfo.update && _versionInfo.update.enabled);
+  const res = await fetch('/api/version/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                                                    body: JSON.stringify({check: on})});
+  if (res.ok) { _versionInfo = await res.json(); renderVersionInfo(); }
+  else alert('Could not change the update check (' + res.status + ').');
 }
 document.addEventListener('click', e => {
   const menu = document.getElementById('signout-menu');
@@ -1951,6 +2003,7 @@ function baseOpts(yFmt) {
 
 // ── Load everything ───────────────────────────────────────────────────────────
 async function loadAll() {
+  loadVersionInfo();   // the dot on Sign out ▾ when a newer release is known; not awaited
   const [sumRes, tsRes, acctRes, regRes, regTsRes] = await Promise.all([
     fetch('/api/data/summary'),
     fetch('/api/data/timeseries'),

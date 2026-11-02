@@ -441,14 +441,16 @@ def decrypt_backup(blob: bytes, passphrase: str) -> bytes:
 
 
 def get_backup_path(backup_id: str) -> Path:
-    """Return path to the backup ZIP; raise ValueError for a malformed id or a missing file."""
+    """Return path to the backup ZIP; raise ValueError for a malformed id or a missing file.
+    The id is checked against BACKUP_ID_RE and then only COMPARED with the names in BACKUP_DIR: the
+    path returned is the directory's own entry, never one built from the request's text."""
     if not isinstance(backup_id, str) or not BACKUP_ID_RE.fullmatch(backup_id):
         raise ValueError("Backup not found")
-    base = BACKUP_DIR.resolve()
-    path = (BACKUP_DIR / f"{backup_id}.zip").resolve()
-    if path.parent != base or not path.is_file():
-        raise ValueError("Backup not found")
-    return path
+    _ensure_dir()
+    for entry in BACKUP_DIR.iterdir():
+        if entry.name == f"{backup_id}.zip" and entry.is_file():
+            return entry.resolve()
+    raise ValueError("Backup not found")
 
 
 def check_zip_limits(zf: zipfile.ZipFile) -> None:

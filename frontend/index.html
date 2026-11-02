@@ -997,23 +997,18 @@ async function renderBackupSettings() {
   const b = _backupSettings, eff = b.effective;
   const hh = h => String(h).padStart(2, '0') + ':00 UTC';
   const env = [b.backup_daily, b.backup_keep, b.backup_hour].filter(x => x.source === 'env').map(x => x.env_var);
-  const last = b.last_scheduled ? new Date(b.last_scheduled).toLocaleString() : 'not yet';
-  const summary = (eff.daily ? `A backup is taken every day at ${hh(eff.hour)} (last: ${escHtml(last)})` : 'The daily backup is off')
-    + (eff.keep ? `, keeping the newest ${Number(eff.keep)} automatic backups` : ', keeping every automatic backup')
-    + '; a backup is also taken before the first import of a day, and before a restore. Backups you take or upload are never removed by Flow.';
+  const last = b.last_scheduled ? new Date(b.last_scheduled).toLocaleString() : 'none yet';
+  const locked = env.length ? 'disabled' : '';
   const hours = Array.from({length: 24}, (_, h) => `<option value="${h}" ${h === eff.hour ? 'selected' : ''}>${hh(h)}</option>`).join('');
-  el.innerHTML = `<div>${summary} ${env.length ? '' : '<button type="button" class="link" onclick="backupToggleSettings()">change</button>'}</div>
-    ${env.length ? `<div class="ai-env">Set by <code>${escHtml(env.join(', '))}</code> in .env, which wins while it is there. Remove it from .env (<code>./setup.sh</code> offers to) and run <code>./deploy.sh</code> to manage it here.</div>` : ''}
-    <div id="backup-settings-form" class="settings-row hidden" style="margin-top:8px">
-      <label class="cd-check"><input type="checkbox" id="bk-daily" ${eff.daily ? 'checked' : ''}> Daily backup at</label>
-      <select id="bk-hour" style="width:auto">${hours}</select>
-      <label class="cd-check">keep the newest <input type="number" id="bk-keep" min="0" max="3650" value="${Number(eff.keep)}" style="width:80px"> automatic backups (0 keeps all)</label>
-      <button class="btn-primary btn-sm" onclick="backupSaveSettings()">Save</button>
+  el.innerHTML = `<div class="settings-row">
+      <label class="cd-check"><input type="checkbox" id="bk-daily" ${eff.daily ? 'checked' : ''} ${locked}> Daily backup at</label>
+      <select id="bk-hour" style="width:auto" ${locked}>${hours}</select>
+      <label class="cd-check">keep the newest <input type="number" id="bk-keep" min="0" max="3650" value="${Number(eff.keep)}" style="width:80px" ${locked}> automatic backups (0 keeps all)</label>
+      ${locked ? '' : '<button class="btn-primary btn-sm" onclick="backupSaveSettings()">Save</button>'}
       <span id="bk-msg" class="cd-note"></span>
-    </div>`;
-}
-function backupToggleSettings() {
-  document.getElementById('backup-settings-form').classList.toggle('hidden');
+    </div>
+    ${env.length ? `<div class="ai-env">Set by <code>${escHtml(env.join(', '))}</code> in .env, which wins while it is there. Remove it from .env (<code>./setup.sh</code> offers to) and run <code>./deploy.sh</code> to manage it here.</div>` : ''}
+    <div style="margin-top:6px">Last daily backup: ${escHtml(last)}. A backup is also taken before the first import of a day and before a restore; backups you take or upload are never removed by Flow.</div>`;
 }
 async function backupSaveSettings() {
   const body = {daily: document.getElementById('bk-daily').checked, hour: Number(document.getElementById('bk-hour').value),
@@ -1022,7 +1017,9 @@ async function backupSaveSettings() {
   const res = await fetch('/api/backups/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const d = await res.json().catch(() => ({}));
   if (!res.ok) { msg.textContent = typeof d.detail === 'string' ? d.detail : 'Could not save (' + res.status + ').'; return; }
-  renderBackupSettings();
+  await renderBackupSettings();
+  const after = document.getElementById('bk-msg');
+  if (after) after.textContent = 'Saved.';
 }
 
 async function loadBackupList() {

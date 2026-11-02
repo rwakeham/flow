@@ -29,7 +29,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 ## Features
 
 **Dashboard**
-- **Needs attention**: one panel at the top listing what is waiting, each row opening the place to act: bank rows to reconcile or matches to confirm in a cash account, accounts with no balance for the month or no statement in 40 days, payees without a role, card charges to review, subscriptions overdue, with a price change or on two cards, import formats not tried yet, AI paused, the daily backup off or no backup in a week, and a newer Flow release
+- **Needs attention**: one panel at the top listing what is waiting, each row opening the place to act: bank rows to reconcile or matches to confirm in a cash account, accounts with no balance for the month or no statement in 40 days, payees without a role, card charges to review, subscriptions overdue, with a price change or on two cards, import formats not tried yet, AI paused, the daily backup off or no backup in a week, and a newer Flow release. Each row can be put off (remind me tomorrow, in a week or in a month) or ignored until something new happens on it; a hidden row comes back on its own when its count grows, and "hidden" at the bottom of the panel shows them again
 - Net worth chart with month-over-month history
 - Asset allocation breakdown (investments, real estate, cash, etc.)
 - Liability tracking

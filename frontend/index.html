@@ -132,6 +132,17 @@ button:hover { background: var(--surface2); }
 .attention-row:hover { background: var(--surface2); }
 .attention-row .acct-behind-count { margin-left: 0; min-width: 28px; text-align: center; }
 .attention-row .go { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.attention-item { display: flex; align-items: center; gap: 4px; position: relative; }
+.attention-item .attention-row { flex: 1; min-width: 0; }
+.attention-item.muted { opacity: 0.6; }
+.attention-snooze { border: none; background: none; color: var(--text-muted); font-size: 12px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
+.attention-snooze:hover { background: var(--surface2); color: var(--text); }
+.attention-menu { position: absolute; right: 0; top: calc(100% - 2px); z-index: 20; min-width: 200px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0,0,0,0.15); padding: 4px; display: flex; flex-direction: column; }
+.attention-menu button { text-align: left; border: none; background: none; padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer; color: var(--text); font-size: 13px; }
+.attention-menu button:hover { background: var(--surface2); }
+.attention-hidden { padding: 6px 8px 2px; }
+.attention-hidden button.link { border: none; background: none; padding: 0; color: var(--text-muted); font-size: 12px; cursor: pointer; text-decoration: underline; }
 .attention-empty { font-size: 13px; color: var(--text-muted); padding: 4px 8px; }
 .chart-wrap canvas { max-width: 100%; }
 .stat-big { font-size: 28px; font-weight: 700; letter-spacing: -1px; margin-bottom: 4px; }
@@ -2090,16 +2101,47 @@ async function loadAll() {
 // subscriptions overdue, AI paused, an update ...), each row opening the place to act. Fetched after
 // the Dashboard is drawn, and again whenever the Dashboard is shown.
 const ATTENTION_COLLAPSED = 'flow-attention-collapsed';
+let _attention = {items: [], hidden: [], showHidden: false};
 async function loadAttention() {
-  let items;
+  let d;
   try {
     const res = await fetch('/api/attention', {headers: {'X-Flow-Today': todayIso()}});
     if (!res.ok) return;
-    items = (await res.json()).items || [];
+    d = await res.json();
   } catch (e) { return; }
-  renderAttention(items);
+  renderAttention(d.items || [], d.hidden || []);
 }
-function renderAttention(items) {
+// Snooze: hide an item until tomorrow / a week / a month, or until something new happens on it
+// (POST /api/attention/snooze); "Show again" lifts it (DELETE). Kept on the server, so every device agrees.
+async function attentionSnooze(key, period) {
+  const body = {key, for: period || null};
+  const res = await fetch('/api/attention/snooze', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Flow-Today': todayIso()}, body: JSON.stringify(body)});
+  if (!res.ok) { alert('Could not snooze (' + res.status + ').'); return; }
+  const d = await res.json();
+  renderAttention(d.items || [], d.hidden || []);
+}
+async function attentionUnsnooze(key) {
+  const res = await fetch('/api/attention/snooze/' + encodeURIComponent(key), {method: 'DELETE', headers: {'X-Flow-Today': todayIso()}});
+  if (!res.ok) { alert('Could not unhide (' + res.status + ').'); return; }
+  const d = await res.json();
+  _attention.showHidden = (d.hidden || []).length > 0;
+  renderAttention(d.items || [], d.hidden || []);
+}
+function attentionMenu(ev, key) {
+  ev.stopPropagation();
+  const open = document.querySelector('.attention-menu');
+  if (open) { const was = open.dataset.key === key; open.remove(); if (was) return; }
+  const btn = ev.currentTarget;
+  const menu = document.createElement('div');
+  menu.className = 'attention-menu'; menu.dataset.key = key; menu.setAttribute('role', 'menu');
+  menu.innerHTML = [['day', 'Remind me tomorrow'], ['week', 'Remind me in a week'], ['month', 'Remind me in a month'], ['', 'Ignore until it changes']]
+    .map(([p, label]) => `<button type="button" role="menuitem" onclick="attentionSnooze(${escHtml(JSON.stringify(key))}, ${escHtml(JSON.stringify(p))})">${label}</button>`).join('');
+  btn.parentElement.appendChild(menu);
+}
+document.addEventListener('click', e => { const m = document.querySelector('.attention-menu'); if (m && !m.contains(e.target)) m.remove(); });
+function attentionToggleHidden() { _attention.showHidden = !_attention.showHidden; renderAttention(_attention.items, _attention.hidden); }
+function renderAttention(items, hidden = []) {
+  _attention.items = items; _attention.hidden = hidden;
   const panel = document.getElementById('attention'), list = document.getElementById('attention-list');
   let collapsed = false;
   try { collapsed = localStorage.getItem(ATTENTION_COLLAPSED) === '1'; } catch (e) { /* storage off */ }
@@ -2109,9 +2151,15 @@ function renderAttention(items) {
   const count = document.getElementById('attention-count');
   count.textContent = items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : '';
   count.classList.toggle('hidden', !(collapsed && items.length));
-  list.innerHTML = items.length ? items.map(i => `<button type="button" class="attention-row" onclick="askNavigate(${escHtml(JSON.stringify(i.nav || null))})">
-      <span class="acct-behind-count">${Number(i.count) || 0}</span><span>${escHtml(String(i.text))}</span><span class="go">open →</span></button>`).join('')
-    : '<div class="attention-empty">Nothing needs attention.</div>';
+  const row = i => `<div class="attention-item"><button type="button" class="attention-row" onclick="askNavigate(${escHtml(JSON.stringify(i.nav || null))})">
+      <span class="acct-behind-count">${Number(i.count) || 0}</span><span>${escHtml(String(i.text))}</span><span class="go">open →</span></button>
+      <button type="button" class="attention-snooze" title="Remind me later or ignore" aria-haspopup="true" onclick="attentionMenu(event, ${escHtml(JSON.stringify(String(i.key || i.kind)))})">⏾ ▾</button></div>`;
+  const hiddenRow = i => `<div class="attention-item muted"><span class="attention-row" style="cursor:default"><span class="acct-behind-count">${Number(i.count) || 0}</span><span>${escHtml(String(i.text))}</span>
+      <span class="go">${i.snoozed_until ? 'until ' + escHtml(periodLabelDay(i.snoozed_until)) : 'until it changes'}</span></span>
+      <button type="button" class="attention-snooze" onclick="attentionUnsnooze(${escHtml(JSON.stringify(String(i.key || i.kind)))})">Show again</button></div>`;
+  list.innerHTML = (items.length ? items.map(row).join('') : '<div class="attention-empty">Nothing needs attention.</div>')
+    + (hidden.length ? `<div class="attention-hidden"><button type="button" class="link" onclick="attentionToggleHidden()">${hidden.length} hidden ${_attention.showHidden ? '▴' : '▾'}</button></div>`
+        + (_attention.showHidden ? hidden.map(hiddenRow).join('') : '') : '');
   panel.classList.remove('hidden');
 }
 function attentionToggle() {
@@ -2449,6 +2497,9 @@ function parseLocalDate(s) {
 function localIso(d) {
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function periodLabelDay(p) {
+  return parseLocalDate(p).toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
 }
 function periodLabel(p) {
   return parseLocalDate(p).toLocaleDateString('en-US', {month:'short', year:'2-digit'});

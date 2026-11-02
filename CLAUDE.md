@@ -313,6 +313,12 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   account, reconcile}`, `{section:'cards', tab}`) or a dialog (`{action:'settings', section}`, `balances`,
   `import`, `formats`); `test_attention.known_nav` lists them. The panel is fetched after `loadAll` draws the
   page and when the Dashboard is shown again; collapsed state in `localStorage`. Text is escaped by the page.
+  **Snoozing**: every item has a stable `key` (`kind`, or `kind:<id>` per account, `update:<version>`);
+  `POST /api/attention/snooze {key, for: day|week|month|null}` stores `{until, count}` under the item's key in
+  one `flow_settings` JSON row (`attention.SNOOZE_KEY`, read back through `clean_snoozes` since it travels in
+  backups), `DELETE /api/attention/snooze/{key}` lifts it. `split_snoozed` hides an item while its date hasn't
+  passed (no date = ignore until it changes) AND its count hasn't grown; `prune_snoozes` drops expired ones on
+  every write. The reply is `{items, hidden}`; the panel's ⏾ ▾ menu and the "N hidden" footer are in `index.html`.
 - **CSV exports** (`exports.py`): every export goes through `exports.csv_response(header, rows, name)`, which
   writes floats with two decimals, ints as they are, booleans as yes/blank, None blank and text through
   `spreadsheet_safe` (a leading `'` before = + - @, so an amount must be a number, never a string: a "-12.50"

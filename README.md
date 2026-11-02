@@ -171,6 +171,7 @@ git pull
 
 Flow's version (`MAJOR.MINOR.PATCH`) is shown at the bottom of the **Sign out ▾** menu and printed by `deploy.sh`. Each release is listed on the [Releases page](https://github.com/rwakeham/flow/releases) with what changed.
 
+- **Know when there is one**: Flow checks GitHub once a day and, when a newer release exists, puts a dot on **Sign out ▾**; the menu shows the version with a link to its notes. **Check for updates** there asks right away, **hide** keeps a release quiet until the next one, and the same menu turns the daily check off. Flow never updates itself.
 - **Follow `main`**: `git pull && ./deploy.sh`. Every merge to `main` passes the tests and the privacy check; releases are tagged points on it.
 - **Stay on one release**: `git fetch --tags && git checkout v3.0.0 && ./deploy.sh`. Go back to following releases with `git checkout main && git pull && ./deploy.sh`.
 - **Read the notes before a new major version** (3.x to 4.0): a major version is one that asks something of you, such as a new `.env` setting. Patch and minor releases (fixes and features) never do. Back up first anyway (**Backups** in the top bar).

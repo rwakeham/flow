@@ -16,8 +16,19 @@ os.environ["FLOW_FRONTEND_DIR"] = str(pathlib.Path(__file__).resolve().parent.pa
 import main  # noqa: E402
 
 
+def all_paths(app) -> set[str]:
+    """Every route path, included routers unfolded (this FastAPI keeps them as one entry each)."""
+    out = set()
+    for r in app.routes:
+        if hasattr(r, "original_router"):
+            out |= {x.path for x in r.original_router.routes}
+        elif hasattr(r, "path"):
+            out.add(r.path)
+    return out
+
+
 def test_the_app_builds_with_every_router():
-    paths = {getattr(r, "path", None) for r in main.app.routes}
+    paths = all_paths(main.app)
     for p in ("/api/health", "/api/attention", "/api/changes", "/api/backups/settings", "/api/version",
               "/api/cards/export-year.csv", "/api/data/export.csv", "/api/auth/change-password"):
         assert p in paths, p

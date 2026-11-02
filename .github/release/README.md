@@ -7,9 +7,12 @@ Flow is developed and released in this one repository. A release is a tag `v<ver
 
 - **The version** is the one line in `backend/VERSION` (semver). The app shows it under
   Sign out ▾ and `deploy.sh` prints it. Nobody edits it by hand: the release run does.
-- **Releases are manual.** **Actions → Release → Run workflow**, on `main`. Inputs:
+- **Every push to `main` releases**, once the tests pass: the version is worked out from the
+  commits since the last release (below) and the release published. A push that changed only
+  docs, tests or CI is not released on its own; it goes out with the next user-facing change.
+- **A manual run** (**Actions → Release → Run workflow**, on `main`) does the same with inputs:
   - **Version bump**: `auto` (default) works it out from the commits since the last release;
-    `patch`, `minor` or `major` overrides that.
+    `patch`, `minor` or `major` overrides that. A docs-only change becomes a patch here.
   - **Dry run**: work it all out and attach the preview, change nothing.
 - **What `auto` picks**, highest across the commits since the last release:
   - a `Release: major|minor|patch|none` trailer in a commit message decides for that commit;
@@ -28,11 +31,14 @@ Flow is developed and released in this one repository. A release is a tag `v<ver
   `main` (if `main` moved since the run started, this push fails and nothing is published: run it
   again), the commit tagged `v<version>` with the notes, and the GitHub Release created from the
   tag with the same notes.
-- **Pushes to `main` and pull requests** run the same steps up to the preview, so every merge
-  shows what the next release would be and whether the tree passes the privacy check. They
-  never commit, tag or publish.
-- **If a run fails after pushing the bump**, run it again: the raised version is used as it is,
-  an existing tag is kept, and a missing Release is created.
+- **Pull requests** run the same steps up to the preview, so every pull request shows what
+  merging it would release and whether the tree passes the privacy check. They never commit,
+  tag or publish.
+- **Two pushes in a row**: the runs queue. If the first run's bump push finds `main` already
+  moved, it fails and publishes nothing; the second run releases both. A bump pushed with the
+  workflow token starts no run, so a release never triggers itself.
+- **If a run fails after pushing the bump**, push again or run it by hand: the raised version is
+  used as it is, an existing tag is kept, and a missing Release is created.
 
 People who cloned the repository update with `git pull && ./deploy.sh`, or pin a release with
 `git checkout v<version>`.
@@ -54,11 +60,25 @@ People who cloned the repository update with `git pull && ./deploy.sh`, or pin a
   so the log never repeats it
 
 The denylist is never committed. The workflow reads it from the `PUBLISH_DENYLIST`
-secret; a real release refuses to run without one. A false positive of a built-in rule
-goes in `allow.txt` as `<path>:<rule>`; a denylist hit can't be allowed, only fixed.
+secret and requires it on every push and on every pull request from this repository (a
+fork's or Dependabot's pull request has no repository secrets, so there only the built-in
+rules run; the merge's own push checks the denylist before releasing). A false positive of
+a built-in rule goes in `allow.txt` as `<path>:<rule>`; a denylist hit can't be allowed,
+only fixed.
 
 The same built-in rules run on every pull request through `test_release.py`, over every
 tracked file, so a secret or a personal email fails CI before it reaches `main`.
+
+**Before a push**, `push_check.py` runs `release.py preview` on HEAD and refuses the push on
+any finding. It is wired up as a Claude Code hook in `.claude/settings.json` (before every
+`git push` the assistant runs); for a plain shell it works as a pre-push hook too:
+
+```bash
+printf '%s\n' '#!/bin/sh' 'echo "{\"tool_input\":{\"command\":\"git push\"}}" | python3 .github/release/push_check.py' > .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+```
+
+The denylist reaches it through `$PUBLISH_DENYLIST` (one entry per line) or
+`$PUBLISH_DENYLIST_FILE`; with neither set it says so and runs the built-in rules alone.
 
 ## Setting it up (once)
 
@@ -67,8 +87,12 @@ tracked file, so a secret or a personal email fails CI before it reaches `main`.
 2. **Actions permissions** in **Settings → Actions → General**: allow Actions, and give the
    workflow token **Read and write permissions** (the release run commits the version bump,
    pushes the tag and creates the Release).
-3. If `main` gets branch protection, let GitHub Actions push to it: the release run commits
-   the version bump there.
+3. **Branch protection on `main`** (Settings → Rules → Rulesets): require a pull request and
+   the `test` and `release` status checks, and add a bypass for GitHub Actions so the release
+   run can push the version bump. Check it with a manual **Dry run** first: the push step
+   fails loudly if the bypass is missing.
+4. **Secret scanning push protection** (Settings → Code security): GitHub's own check at push
+   time for API keys and tokens. It complements the denylist, which it doesn't know.
 
 ## Before a release: review locally
 

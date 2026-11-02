@@ -1,10 +1,13 @@
-# Releases are manual: Actions -> Release -> Run workflow (on main). The run works out the
-# next version from the commits since the last release (or the bump you pick), privacy-checks
-# the tree and the notes, commits the bump to backend/VERSION, tags it v<version> with the
-# notes and publishes the GitHub Release. See .github/release/README.md.
+# Every push to main releases: the run works out the next version from the commits since
+# the last release, privacy-checks the tree and the notes, commits the bump to
+# backend/VERSION, tags it v<version> with the notes and publishes the GitHub Release. A push
+# that changed only docs, tests or CI waits for the next user-facing change. A manual run
+# (Actions -> Release -> Run workflow, on main) does the same with a bump you pick, or a dry
+# run, and releases a docs-only change as a patch. See .github/release/README.md.
 #
-# Pushes to main and pull requests run the same steps up to the preview: what the next
-# release would be, its notes and the privacy check. They never commit, tag or publish.
+# Pull requests run the same steps up to the preview: what the next release would be, its
+# notes and the privacy check (the denylist required, except for a fork or Dependabot, which
+# have no repository secrets). They never commit, tag or publish.
 name: Release
 
 on:
@@ -70,14 +73,17 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           NOTHING: ${{ steps.next.outputs.nothing }}
+          TRIVIAL: ${{ steps.next.outputs.trivial }}
           TAG: ${{ steps.next.outputs.tag }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           publish=false
           if [[ "$NOTHING" == "true" ]]; then
             why="nothing to release since the last release"
-          elif [[ "$EVENT" != "workflow_dispatch" ]]; then
-            why="preview of ${TAG}: releases are made with Actions -> Release -> Run workflow"
+          elif [[ "$EVENT" != "workflow_dispatch" && "$TRIVIAL" == "true" ]]; then
+            why="preview of ${TAG}: only docs, tests or CI changed since the last release; released with the next user-facing change, or by a manual run"
+          elif [[ "$EVENT" == "pull_request" ]]; then
+            why="preview of ${TAG}: merging releases it"
           elif [[ "$REF" != "refs/heads/main" ]]; then
             why="releases run on main only"
           elif [[ "$DRY_RUN" == "true" ]]; then
@@ -106,9 +112,12 @@ jobs:
 
       - name: Privacy check
         if: steps.next.outputs.nothing != 'true'
+        # The denylist is required wherever the secret can exist: every push, and a pull request
+        # from this repository. A fork's or Dependabot's pull request has no repository secrets, so
+        # there the built-in rules run alone and the merge's own push checks the denylist.
         env:
           PUBLISH_DENYLIST: ${{ secrets.PUBLISH_DENYLIST }}
-          REQUIRE: ${{ steps.decide.outputs.publish == 'true' && '--require-denylist' || '' }}
+          REQUIRE: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && '--require-denylist' || '' }}
         run: |
           python3 .github/release/release.py check "$RUNNER_TEMP/preview/tree" \
             --notes "$RUNNER_TEMP/preview/notes.md" $REQUIRE | tee -a "$GITHUB_STEP_SUMMARY"
@@ -123,7 +132,9 @@ jobs:
           retention-days: 14
 
       # From here on, only a real release. The bump goes to main first: if main moved since
-      # the run started, this push fails and nothing is published (run it again).
+      # the run started, this push fails and nothing is published; the run for that later push
+      # (queued behind this one) releases both. A bump pushed with the workflow token starts no
+      # new run, so a release never triggers itself.
       - name: Push the version bump to main
         if: steps.decide.outputs.publish == 'true' && steps.next.outputs.bumped == 'true'
         run: git push origin HEAD:refs/heads/main

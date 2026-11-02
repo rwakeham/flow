@@ -196,10 +196,13 @@ def test_breaking_markers_mean_major():
 def test_docs_tests_and_ci_alone_are_a_patch():
     commits = [_c("Reword the quick start", files=["README.md", "docs/screenshots/a.png"]),
                _c("More tests", files=["backend/test_cards.py", "tests/test_deploy_script.py"]),
-               _c("Pin actions", files=[".github/workflows/ci.yml"])]
+               _c("Pin actions", files=[".github/workflows/ci.yml", ".claude/settings.json"])]
     assert all(R.commit_level(c)[0] == "none" for c in commits)
     n = R.next_release("3.1.0", ["v3.1.0"], commits)
     assert (n.version, n.level) == ("3.1.1", "patch")
+    # ... and marked trivial, so a push to main doesn't release until something user-facing lands.
+    assert n.trivial and "trivial=true" in n.lines()
+    assert not R.next_release("3.1.0", ["v3.1.0"], commits + [_c("Fix a thing")]).trivial
 
 
 def test_a_chosen_level_overrides_auto():
@@ -217,3 +220,37 @@ def test_nothing_to_release_and_a_lowered_version_are_refused():
 def test_the_bump_commit_is_left_out_of_the_notes():
     assert R.clean_subject("Release 3.1.0") is None
     assert R.clean_subject("Release notes are clearer") == "Release notes are clearer"
+
+
+# ── the pre-push hook (.claude/settings.json) ────────────────────────────────
+
+def _hook(command, env=None):
+    """Run push_check.py as Claude Code does: the tool call as JSON on stdin."""
+    import json
+    import os
+    import subprocess
+    return subprocess.run([sys.executable, str(HERE / "push_check.py")],
+                          input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+                          capture_output=True, text=True, env={**os.environ, **(env or {})})
+
+
+def test_the_push_hook_only_acts_on_a_git_push():
+    spec = importlib.util.spec_from_file_location("push_check", HERE / "push_check.py")
+    P = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(P)
+    assert P.is_push("git push -u origin feature")
+    assert P.is_push("cd backend && git -C .. push origin main 2>&1 | tail -1")
+    assert not P.is_push("git status") and not P.is_push("echo push it") and not P.is_push("")
+    r = _hook("git status")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+
+
+def test_the_push_hook_passes_a_clean_commit_and_refuses_a_denylist_hit():
+    """HEAD of this repository passes the built-in rules (the test above proves the tree does);
+    a denylist term that the tree contains refuses the push, without printing the term."""
+    r = _hook("git push -u origin feature")
+    assert r.returncode == 0, r.stderr
+    r = _hook("git push -u origin feature", {"PUBLISH_DENYLIST": "fastapi", "PUBLISH_DENYLIST_FILE": ""})
+    assert r.returncode == 2
+    assert "Push refused" in r.stderr and "entry 1 of the denylist" in r.stderr
+    assert "fastapi" not in r.stderr.lower()

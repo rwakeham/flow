@@ -113,8 +113,8 @@ LEVELS = ("none", "patch", "minor", "major")
 TRAILER = re.compile(r"^Release:\s*(major|minor|patch|none)\s*$", re.I | re.M)
 BREAKING = re.compile(r"^BREAKING[ -]CHANGE\b|^Breaking:", re.M)
 FEATURE_VERBS = {"add", "adds", "introduce", "introduces", "new", "support", "supports", "enable", "allow"}
-# Paths whose changes alone don't change Flow for its users (they still ship, as a patch).
-NOT_USER_FACING = re.compile(r"^(docs/|tests/|\.github/|backend/test_[^/]*\.py$|backend/testdata/|[^/]*\.md$)")
+# Paths whose changes alone don't change Flow for its users (they still ship, with the next change).
+NOT_USER_FACING = re.compile(r"^(docs/|tests/|\.github/|\.claude/|backend/test_[^/]*\.py$|backend/testdata/|[^/]*\.md$)")
 
 
 @dataclass
@@ -157,15 +157,18 @@ class Next:
     level: str             # initial | manual | patch | minor | major
     previous: str          # the latest release tag, "" for the first
     reasons: list[str]     # one line per commit that decided the level
+    trivial: bool = False  # only docs, tests or CI changed since the last release: an automatic
+                           # release waits for a user-facing change; a manual one is a patch
 
     def lines(self) -> list[str]:
         return [f"current={self.current}", f"version={self.version}", f"tag=v{self.version}",
                 f"level={self.level}", f"previous={self.previous}",
-                f"bumped={'true' if self.version != self.current else 'false'}"]
+                f"bumped={'true' if self.version != self.current else 'false'}",
+                f"trivial={'true' if self.trivial else 'false'}"]
 
 
 def next_release(version_text: str, tags: list[str], commits: list[Commit], requested: str = "auto") -> Next:
-    """The version a manual release publishes. The first release publishes VERSION as it is; a
+    """The version a release publishes. The first release publishes VERSION as it is; a
     VERSION already raised by hand above the latest release is used as it is; otherwise it is
     bumped by ``requested``, or for "auto" by the highest level among the commits since then."""
     v = parse_version(version_text)
@@ -192,7 +195,7 @@ def next_release(version_text: str, tags: list[str], commits: list[Commit], requ
     reasons = [f"{lvl}: {c.subject} ({why})" for c, lvl, why in judged if lvl == top]
     if top == "none":
         reasons = ["patch: only docs, tests or CI changed since " + latest]
-    return Next(current, bump(current, level), level, latest, reasons)
+    return Next(current, bump(current, level), level, latest, reasons, trivial=top == "none")
 
 
 def commits_since(tag: str, ref: str = "HEAD") -> list[Commit]:

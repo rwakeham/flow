@@ -1,12 +1,13 @@
 // The Settings dialog (top bar → ⚙ Settings): AI, Backups, Updates and Account in one place,
 // one section each. The sections' contents are rendered by their own code: ai.js (aiRender),
-// index.html (loadBackupList, loadVersionInfo, the password form). Loaded after them.
+// index.html (loadBackupList, loadVersionInfo, the password form), changes.js (changesRender). Loaded after them.
 // settingsOpen('backups') opens straight onto a section; the last one opened is remembered.
 
 const SETTINGS_SECTIONS = [
   ['ai', 'AI', 'key, models, privacy log', () => aiRender()],
   ['backups', 'Backups', 'on this server: take, download, restore', () => loadBackupList()],
   ['updates', 'Updates', 'version and the daily check', () => loadVersionInfo()],
+  ['changes', 'Change log', 'what changed, when, and by whom', () => changesRender()],
   ['account', 'Account', 'change the password', () => settingsResetPassword()],
 ];
 const SETTINGS_REMEMBER = 'flow-settings-section';
@@ -48,6 +49,7 @@ function settingsInject() {
         </div>
         <p class="cd-note" style="margin-top:10px">Flow never installs an update itself: on the server, run <code>git pull &amp;&amp; ./deploy.sh</code>.</p>
       </section>
+      <section id="settings-changes" hidden><h3>Change log</h3><div class="empty">Loading…</div></section>
       <section id="settings-account" hidden>
         <h3>Account</h3>
         <p class="cd-note">The dashboard password is kept on this server as a hash. Changing it ends every session, this one included.</p>

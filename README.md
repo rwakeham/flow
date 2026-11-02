@@ -94,7 +94,8 @@ Change the password under **Settings → Account** and the AI settings under **S
 
 **General**
 - Single-password authentication with session cookie
-- **⚙ Settings** in the top bar: AI (key, models, privacy log), Backups, Updates (version, check now, the daily switch) and Account (change the password); **Sign out ▾** signs out here or everywhere
+- **⚙ Settings** in the top bar: AI (key, models, privacy log), Backups, Updates (version, check now, the daily switch), Change log and Account (change the password); **Sign out ▾** signs out here or everywhere
+- **Change log** (Settings → Change log): every change to your data, newest first: imports and what they added, backups and restores, each register entry or balance you add, edit or delete, merchant and category edits, rules, payee roles, import formats, settings, the AI's categorization runs, and whether you, the Assistant, a schedule or a startup migration did it. Kept on this server only (never in a backup), the newest 20,000 entries
 - Dark mode support
 - Fully self-hosted: no accounts or telemetry, and the one call Flow makes on its own, a daily check for a newer release, can be switched off (see [What leaves your machine](#what-leaves-your-machine))
 
@@ -109,7 +110,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 
 **Flow is meant to run on a private, limited-access network**, such as a home network, or to be reached from outside only through a VPN or an HTTPS reverse proxy you control. It is not built to face the public internet directly. Several of its design decisions rely on that:
 
-- **One shared password, one user.** There are no accounts, roles or audit trail; anyone with the password sees and can change everything.
+- **One shared password, one user.** There are no accounts or roles (the change log says what changed and when, not who typed the password); anyone with the password sees and can change everything.
 - **Plain HTTP by default.** Traffic, including the password and session cookie, is encrypted only if you put Flow behind HTTPS.
 - **Defense in depth over completeness.** The app runs as an unprivileged user with request, file and backup size limits, security headers and a login throttle, but some container hardening and base-image findings are accepted as low risk on a private network.
 - **Your data in plain form on your server.** The database and the backup files on the server aren't encrypted by Flow; protect the host. A copy you download can be encrypted under a passphrase (**↓ encrypted** in **Settings → Backups**) for keeping somewhere else.
@@ -132,7 +133,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 - **US merchants.** The local categorization rules know about 400 common US brands; elsewhere more merchants go to the AI (or to you). A purchase counts as "foreign" when the card export says it was outside the US, which matters for the Review tab if your card isn't a US one.
 - **English pages, dollar amounts.** Pasted account summaries are read from English wording ("ending in 1234", "balance", "closed"). Paste markers (teach Flow where a balance is once) work whatever the wording, but both need amounts written with `$`; for a page in another currency, type the values or import a balance file.
 - **CSV, TSV and XLSX only.** There is no OFX, QFX or QIF import: export CSV from your bank. Column headers are recognised in English; a file in another language is read by column position, which you check in the format editor. Amounts written with a "DR" / "CR" suffix ("45.10 DR") can't be read.
-- **Single user.** One password and no roles or audit trail.
+- **Single user.** One password and no roles; the change log records what changed and when, not who (there is one user).
 - **File size.** An import file can be up to 10 MB and 50,000 rows; split a longer history into several date ranges.
 
 ## Requirements

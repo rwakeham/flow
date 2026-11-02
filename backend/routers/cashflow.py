@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 import card_taxonomy
 import cash_flow
+import change_log
 from auth import require_auth
 from database import get_db
 from models import Account, CardAccount, CardTransaction, PayeeRole, RegisterAccount, Transaction
@@ -189,6 +190,8 @@ def set_role(key: str, body: RoleBody, db: Session = Depends(get_db)):
     if body.label.strip():
         r.label = body.label.strip()[:120]
     db.add(r)
+    change_log.record(db, "payee", "role", f"{change_log.clip(r.label)} → {r.role}" + (f" ({r.category})" if r.category else "") + (f" → {change_log.clip(r.target)}" if r.target else ""),
+                      {"key": r.key, "role": r.role, "category": r.category, "target": r.target})
     db.commit()
     return {"key": r.key, "label": r.label, "role": r.role, "category": r.category, "target": r.target}
 
@@ -197,6 +200,7 @@ def set_role(key: str, body: RoleBody, db: Session = Depends(get_db)):
 def clear_role(key: str, db: Session = Depends(get_db)):
     r = db.get(PayeeRole, key.strip().upper())
     if r is not None:
+        change_log.record(db, "payee", "clear", f"{change_log.clip(r.label)}: role cleared", {"key": r.key, "was": r.role})
         db.delete(r)
         db.commit()
     return {"key": key, "cleared": r is not None}

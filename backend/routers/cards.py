@@ -30,6 +30,7 @@ import card_recurring
 import card_rules
 import card_taxonomy
 import cash_flow
+import change_log
 import exports
 from auth import require_auth
 from backup_service import ensure_daily_backup
@@ -95,6 +96,7 @@ def create_account(body: CardAccountBody, db: Session = Depends(get_db)):
     a = CardAccount(name=name, issuer=(body.issuer or "").strip() or None, last4=_numbers_field(body.last4),
                     cardholder_names=(body.cardholder_names or "").strip() or None, notes=body.notes)
     db.add(a)
+    change_log.record(db, "card", "add_account", f"Added card {change_log.clip(name)}", {"name": name, "issuer": a.issuer})
     db.commit()
     db.refresh(a)
     return _acct_dict(a)
@@ -110,6 +112,7 @@ def update_account(account_id: int, body: CardAccountBody, db: Session = Depends
     a = db.get(CardAccount, account_id)
     if a is None:
         raise HTTPException(status_code=404, detail="Card not found")
+    before = {"name": a.name, "issuer": a.issuer, "last4": a.last4, "archived": bool(a.archived)}
     fields = body.model_fields_set
     if "name" in fields:
         name = (body.name or "").strip()
@@ -125,6 +128,10 @@ def update_account(account_id: int, body: CardAccountBody, db: Session = Depends
         a.last4 = _numbers_field(body.last4)
     if "archived" in fields and body.archived is not None:
         a.archived = body.archived
+    after = {"name": a.name, "issuer": a.issuer, "last4": a.last4, "archived": bool(a.archived)}
+    changed = {k: v for k, v in after.items() if before[k] != v}
+    change_log.record(db, "card", "edit_account", f"Edited card {change_log.clip(before['name'])}" + (f" ({', '.join(changed)})" if changed else ""),
+                      {"id": a.id, "before": {k: before[k] for k in changed}, "after": changed})
     db.commit()
     return _acct_dict(a)
 
@@ -135,6 +142,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
     if a is None:
         raise HTTPException(status_code=404, detail="Card not found")
     import_profile_resolve.unlink_account(db, "card", account_id)
+    change_log.record(db, "card", "delete_account", f"Deleted card {change_log.clip(a.name)} and its transactions", {"id": a.id, "name": a.name})
     db.delete(a)
     db.commit()
 
@@ -249,6 +257,10 @@ async def import_statement(account_id: int, background: BackgroundTasks, file: U
     # next file with it is recognised by number (see import_batch).
     new_numbers = card_import.remember_numbers(acct, parsed.card_numbers)
     card_amount_rules.apply(db)
+    db.flush()
+    change_log.record(db, "card", "import", f"Imported {change_log.clip(filename, 40)} into {change_log.clip(acct.name)}: {len(plan.to_import)} rows ({plan.skipped_duplicates} already on file)",
+                      {"card_account_id": acct.id, "import_id": imp.id, "filename": filename, "format": c.name,
+                       "imported": len(plan.to_import), "skipped": plan.skipped_duplicates, "new_card_numbers": new_numbers})
     db.commit()
 
     # A key the API already rejected is not retried automatically (see card_ai.key_problem).
@@ -285,6 +297,9 @@ def undo_import(import_id: int, db: Session = Depends(get_db)):
     imp = db.get(CardImport, import_id)
     if imp is None:
         raise HTTPException(status_code=404, detail="Import not found")
+    card = db.get(CardAccount, imp.card_account_id)
+    change_log.record(db, "card", "undo_import", f"Undid the import of {change_log.clip(imp.filename or '', 40)} into {change_log.clip(card.name if card else '')}: {imp.rows_imported} rows removed",
+                      {"import_id": imp.id, "card_account_id": imp.card_account_id, "rows": imp.rows_imported})
     db.query(CardTransaction).filter(CardTransaction.import_id == import_id).delete(synchronize_session=False)
     db.delete(imp)
     db.commit()
@@ -458,6 +473,8 @@ def add_custom_category(body: CustomCategoryBody, db: Session = Depends(get_db))
     c = CustomCategory(l1=l1, l2=l2, l3=l3, fixedness=body.fixedness, role=body.role, rewards=body.rewards,
                        ai_visible=body.ai_visible)
     db.add(c)
+    change_log.record(db, "category", "add", f"Added {'detail' if l3 else 'subcategory'} {l1} › {l2}" + (f" › {l3}" if l3 else ""),
+                      {"l1": l1, "l2": l2, "l3": l3, "fixedness": body.fixedness, "role": body.role, "rewards": body.rewards, "ai_visible": body.ai_visible})
     db.commit()
     card_taxonomy.refresh(db)
     return _custom_dict(c, db)
@@ -501,12 +518,15 @@ def edit_custom_category(cat_id: int, body: CustomCategoryEdit, db: Session = De
     if c is None:
         raise HTTPException(status_code=404, detail="Not found")
     _check_attrs(body.fixedness, body.role, body.rewards)
+    old = (c.l1, c.l2, c.l3)
     for k in ("fixedness", "role", "rewards", "ai_visible"):
         if getattr(body, k) is not None:
             setattr(c, k, getattr(body, k))
     moved = 0
     if body.name is not None:
         moved = _rename(db, c.l1, c.l2, c.l3, body.name)
+    change_log.record(db, "category", "edit", f"Edited {old[0]} › {old[1]}" + (f" › {old[2]}" if old[2] else "") + (f": renamed to {change_log.clip(body.name)} ({moved} charges)" if body.name is not None else ""),
+                      {"id": c.id, "was": old, "now": (c.l1, c.l2, c.l3), "moved": moved})
     db.commit()
     card_taxonomy.refresh(db)
     return {**_custom_dict(c, db), "moved": moved}
@@ -577,6 +597,8 @@ class RenameBody(BaseModel):
 def rename_category(body: RenameBody, db: Session = Depends(get_db)):
     """Rename any subcategory or detail (built-in or yours); charges, merchants and rules follow."""
     moved = _rename(db, body.l1.strip(), body.l2.strip(), body.l3.strip(), body.new_name)
+    change_log.record(db, "category", "rename", f"Renamed {body.l1.strip()} › {body.l2.strip()}" + (f" › {body.l3.strip()}" if body.l3.strip() else "") + f" to {change_log.clip(body.new_name)} ({moved} charges)",
+                      {"l1": body.l1, "l2": body.l2, "l3": body.l3, "new_name": body.new_name, "moved": moved})
     db.commit()
     card_taxonomy.refresh(db)
     return {"moved": moved, "l1": body.l1, "l2": body.l2, "l3": body.l3, "name": _clean_name(body.new_name)}
@@ -640,6 +662,8 @@ def move_category(body: MoveBody, db: Session = Depends(get_db)):
     card_amount_rules.apply(db)
     scoped = 0 if f3 else db.query(CardAmountRule).filter(CardAmountRule.scope_l1 == f1,
                                                            CardAmountRule.scope_l2 == f2).count()
+    change_log.record(db, "category", "move", f"Moved {f1} › {f2}" + (f" › {f3}" if f3 else "") + f" to {t1} › {t2}" + (f" › {t3}" if t3 else "") + f" ({moved} charges, {len(remembered)} merchants)",
+                      {"from": (f1, f2, f3), "to": (t1, t2, t3), "moved": moved, "merchants": len(remembered)})
     db.commit()
     return {"moved": moved, "merchants": len(remembered), "rules_left_on_old_subcategory": scoped}
 
@@ -651,6 +675,7 @@ def delete_custom_category(cat_id: int, move_l1: str = "", move_l2: str = "", mo
     c = db.get(CustomCategory, cat_id)
     if c is None:
         return {"moved": 0}
+    names = (c.l1, c.l2, c.l3)
     in_use = _custom_dict(c, db)["transactions"] or db.query(MerchantCategory).filter(
         MerchantCategory.cat_l1 == c.l1, MerchantCategory.cat_l2 == c.l2).count()
     moved = rules_dropped = 0
@@ -668,6 +693,8 @@ def delete_custom_category(cat_id: int, move_l1: str = "", move_l2: str = "", mo
         db.delete(c)
     db.flush()
     card_amount_rules.apply(db)
+    change_log.record(db, "category", "delete", f"Deleted {names[0]} › {names[1]}" + (f" › {names[2]}" if names[2] else "") + (f": {moved} charges moved to {move_l1} › {move_l2}" if moved else ""),
+                      {"deleted": names, "moved_to": (move_l1, move_l2, move_l3) if moved else None, "moved": moved, "rules_removed": rules_dropped})
     db.commit()
     card_taxonomy.refresh(db)
     return {"moved": moved, "rules_removed": rules_dropped}
@@ -850,6 +877,7 @@ def edit_transaction_merchant(txn_id: int, body: EditBody, db: Session = Depends
         raise HTTPException(status_code=404, detail="Transaction not found")
     cat = _category(body)
     name, family = _names(body.name, body.family)
+    old = {"merchant": t.canonical_merchant, "category": [t.cat_l1, t.cat_l2, t.cat_l3]}
     if body.scope == "merchant":
         rows = _merchant_rows(db, t.canonical_merchant, t.merchant_key)
         if t.id not in {r.id for r in rows}:
@@ -857,6 +885,8 @@ def edit_transaction_merchant(txn_id: int, body: EditBody, db: Session = Depends
         old_names = {r.canonical_merchant for r in rows}
         out = apply_merchant_edit(db, rows, name, family, cat, body.overwrite_user, focus_id=t.id)
         _rules_follow(db, old_names, name)
+        change_log.record(db, "card", "merchant_edit", f"{change_log.clip(old['merchant'])} → {change_log.clip(name)}, {cat[0]} › {cat[1]} ({out.get('updated', 0)} charges)",
+                          {"txn_id": t.id, "before": old, "name": name, "family": family, "category": list(cat), **{k: v for k, v in out.items() if isinstance(v, int)}})
         db.commit()
         return {**out, "remembered": bool(t.merchant_key)}
     if body.scope != "this":
@@ -869,6 +899,8 @@ def edit_transaction_merchant(txn_id: int, body: EditBody, db: Session = Depends
     remembered = bool(t.merchant_key and body.remember)
     if remembered:
         _remember(db, t.merchant_key, name, family, *cat)
+    change_log.record(db, "card", "charge_edit", f"{t.date} {change_log.clip(old['merchant'])} {change_log.money(-float(t.amount))} → {change_log.clip(name)}, {cat[0]} › {cat[1]}" + (" (remembered)" if remembered else ""),
+                      {"txn_id": t.id, "before": old, "name": name, "category": list(cat), "remembered": remembered})
     db.commit()
     return {"updated": 1, "kept_user_overrides": 0, "remembered": remembered}
 
@@ -883,6 +915,7 @@ def update_transaction(txn_id: int, body: TxnBody, db: Session = Depends(get_db)
     t = db.get(CardTransaction, txn_id)
     if t is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    old_type, old_notes = t.txn_type, t.notes
     if "notes" in body.model_fields_set:
         t.notes = (body.notes or "").strip() or None
     if body.txn_type is not None and body.txn_type != t.txn_type:
@@ -905,6 +938,10 @@ def update_transaction(txn_id: int, body: TxnBody, db: Session = Depends(get_db)
             title = body.txn_type.replace("_", " ").title()
             t.cat_l1, t.cat_l2, t.cat_l3 = card_taxonomy.EXCLUDED_L1, title, title
         t.category_source = "user"
+    what = ([f"type {old_type} → {t.txn_type}"] if t.txn_type != old_type else []) + (["notes"] if t.notes != old_notes else [])
+    if what:
+        change_log.record(db, "card", "charge_edit", f"{t.date} {change_log.clip(t.canonical_merchant)} {change_log.money(-float(t.amount))}: {', '.join(what)}",
+                          {"txn_id": t.id, "type": [old_type, t.txn_type], "notes_changed": t.notes != old_notes})
     db.commit()
     acct = db.get(CardAccount, t.card_account_id)
     return _txn_dict(t, acct.name if acct else "")
@@ -970,6 +1007,8 @@ def edit_merchant(body: MerchantEditBody, db: Session = Depends(get_db)):
     old_names = {r.canonical_merchant for r in rows}
     out = apply_merchant_edit(db, rows, name, family, cat, body.overwrite_user)
     _rules_follow(db, old_names, name)
+    change_log.record(db, "card", "merchant_edit", f"{change_log.clip(body.name)} → {change_log.clip(name)}, {cat[0]} › {cat[1]} ({out.get('updated', 0)} charges)",
+                      {"before": body.name, "name": name, "family": family, "category": list(cat), **{k: v for k, v in out.items() if isinstance(v, int)}})
     db.commit()
     return {**out, "name": name}
 
@@ -1040,6 +1079,8 @@ def add_amount_rule(body: AmountRuleBody, db: Session = Depends(get_db)):
     db.add(r)
     db.flush()
     changed = card_amount_rules.apply(db, {spec.merchant} if spec.merchant else None)
+    change_log.record(db, "rule", "add", f"Added amount rule for {change_log.clip(spec.merchant or (spec.scope_l1 + (' › ' + spec.scope_l2 if spec.scope_l2 else '')))}: {spec.cat_l1} › {spec.cat_l2} ({changed} charges)",
+                      {**_rule_dict(r), "changed": changed})
     db.commit()
     return {**_rule_dict(r), "changed": changed}
 
@@ -1056,6 +1097,8 @@ def update_amount_rule(rule_id: int, body: AmountRuleBody, db: Session = Depends
     r.cat_l1, r.cat_l2, r.cat_l3 = spec.category
     db.flush()
     changed = card_amount_rules.apply(db, {spec.merchant, old_merchant})
+    change_log.record(db, "rule", "edit", f"Edited amount rule for {change_log.clip(spec.merchant or (spec.scope_l1 + (' › ' + spec.scope_l2 if spec.scope_l2 else '')))}: {spec.cat_l1} › {spec.cat_l2} ({changed} charges)",
+                      {**_rule_dict(r), "changed": changed})
     db.commit()
     return {**_rule_dict(r), "changed": changed}
 
@@ -1066,9 +1109,12 @@ def delete_amount_rule(rule_id: int, db: Session = Depends(get_db)):
     if r is None:
         return {"changed": 0}
     merchant = r.merchant or ""
+    was = _rule_dict(r)
     db.delete(r)
     db.flush()
     changed = card_amount_rules.apply(db, {merchant})       # its charges go back to their own category
+    change_log.record(db, "rule", "delete", f"Deleted amount rule for {change_log.clip(merchant or (was['scope_l1'] + (' › ' + was['scope_l2'] if was['scope_l2'] else '')))} ({changed} charges back)",
+                      {**was, "changed": changed})
     db.commit()
     return {"changed": changed}
 
@@ -1172,6 +1218,8 @@ def set_recurring_status(body: VerdictBody, db: Session = Depends(get_db)):
     v = _verdict_row(db, body.merchant, card_id)
     v.status = body.status
     _drop_if_empty(db, v)
+    change_log.record(db, "recurring", "verdict", f"{change_log.clip(body.merchant)}: {body.status or 'left to detection'}" + ("" if card_id == card_recurring.ALL_CARDS else " on one card"),
+                      {"merchant": body.merchant, "card_account_id": card_id, "status": body.status})
     db.commit()
     return {"merchant": body.merchant, "card_account_id": card_id, "status": body.status}
 
@@ -1194,6 +1242,8 @@ def set_recurring_ended(body: EndedBody, db: Session = Depends(get_db)):
     v = _verdict_row(db, body.merchant, body.card_account_id)
     v.ended_through = last if body.ended else None
     _drop_if_empty(db, v)
+    change_log.record(db, "recurring", "ended", f"{change_log.clip(body.merchant)}: {'ended as of ' + last.isoformat() if body.ended else 'running again'}",
+                      {"merchant": body.merchant, "card_account_id": body.card_account_id, "ended_through": last.isoformat() if body.ended else None})
     db.commit()
     return {"merchant": body.merchant, "card_account_id": body.card_account_id,
             "ended_through": last.isoformat() if body.ended else None}
@@ -1242,6 +1292,8 @@ def add_manual_recurring(body: ManualBody, db: Session = Depends(get_db)):
     """A recurring charge defined by hand: it claims the merchant's charges in its amount range."""
     m = CardManualRecurring(**_manual_fields(body, db))
     db.add(m)
+    change_log.record(db, "recurring", "add", f"Added recurring charge {change_log.clip(m.name)} ({change_log.clip(m.merchant)}, {m.cadence})",
+                      {"name": m.name, "merchant": m.merchant, "cadence": m.cadence, "kind": m.kind, "amount_min": m.amount_min, "amount_max": m.amount_max})
     db.commit()
     return _manual_dict(m)
 
@@ -1251,8 +1303,11 @@ def update_manual_recurring(manual_id: int, body: ManualBody, db: Session = Depe
     m = db.get(CardManualRecurring, manual_id)
     if m is None:
         raise HTTPException(status_code=404, detail="Not found")
+    was = m.name
     for k, v in _manual_fields(body, db).items():
         setattr(m, k, v)
+    change_log.record(db, "recurring", "edit", f"Edited recurring charge {change_log.clip(was)}" + (f" → {change_log.clip(m.name)}" if m.name != was else ""),
+                      {"id": m.id, "name": m.name, "merchant": m.merchant, "cadence": m.cadence, "kind": m.kind, "amount_min": m.amount_min, "amount_max": m.amount_max})
     db.commit()
     return _manual_dict(m)
 
@@ -1261,6 +1316,7 @@ def update_manual_recurring(manual_id: int, body: ManualBody, db: Session = Depe
 def delete_manual_recurring(manual_id: int, db: Session = Depends(get_db)):
     m = db.get(CardManualRecurring, manual_id)
     if m is not None:
+        change_log.record(db, "recurring", "delete", f"Deleted recurring charge {change_log.clip(m.name)}", {"id": m.id, "name": m.name, "merchant": m.merchant})
         db.delete(m)
         db.commit()
 
@@ -1284,6 +1340,8 @@ def set_manual_ended(manual_id: int, body: ManualEndedBody, db: Session = Depend
     if body.ended and last is None:
         raise HTTPException(status_code=409, detail="No charge matches it yet")
     m.ended_through = last if body.ended else None
+    change_log.record(db, "recurring", "ended", f"{change_log.clip(m.name)}: {'ended as of ' + last.isoformat() if body.ended else 'running again'}",
+                      {"id": m.id, "ended_through": last.isoformat() if body.ended else None})
     db.commit()
     return _manual_dict(m)
 

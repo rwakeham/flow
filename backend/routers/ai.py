@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 import card_ai
 import settings_store as st
+import change_log
 from auth import require_auth
 from database import get_db
 from models import AiRequestLog
@@ -92,8 +93,10 @@ def put_settings(body: SettingsBody, db: Session = Depends(get_db)):
     for key in changes:
         if st.setting_source(key) == "env":
             raise _env_locked(st.SETTING_ENV[key])
+    if changes:
+        change_log.record(db, "ai", "settings", "AI settings changed: " + ", ".join(sorted(changes)), {"keys": sorted(changes)})
     for key, value in changes.items():
-        st.save_setting(db, key, value)
+        st.save_setting(db, key, value)          # commits (the change-log row with it)
     return ai_status(db)
 
 
@@ -108,7 +111,8 @@ def put_key(body: KeyBody, db: Session = Depends(get_db)):
     key = "".join(body.key.split())
     if not KEY_RE.match(key):
         raise HTTPException(status_code=422, detail="That doesn't look like an API key (letters, digits, - and _ only).")
-    st.save_secret(db, st.API_KEY, key)
+    change_log.record(db, "ai", "key", "Anthropic API key saved")
+    st.save_secret(db, st.API_KEY, key)          # commits (the change-log row with it)
     return ai_status(db)
 
 
@@ -116,7 +120,8 @@ def put_key(body: KeyBody, db: Session = Depends(get_db)):
 def delete_key(db: Session = Depends(get_db)):
     if st.api_key_source() == "env":
         raise _env_locked("ANTHROPIC_API_KEY")
-    st.save_secret(db, st.API_KEY, None)
+    change_log.record(db, "ai", "key_removed", "Anthropic API key removed")
+    st.save_secret(db, st.API_KEY, None)         # commits (the change-log row with it)
     return ai_status(db)
 
 

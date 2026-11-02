@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import balance_sheet
+import change_log
 import exports
 from auth import require_auth
 from database import get_db
@@ -118,6 +119,7 @@ def create_account(body: AccountCreate, db: Session = Depends(get_db)):
         alert_abs=_check_alert(body.alert_abs),
     )
     db.add(acct)
+    change_log.record(db, "account", "add", f"Added {acct.account_type} account {change_log.clip(acct.name)}", {"name": acct.name, "type": acct.account_type})
     db.commit()
     return _account_json(acct)
 
@@ -127,6 +129,8 @@ def update_account(account_id: int, body: AccountUpdate, db: Session = Depends(g
     acct = db.get(Account, account_id)
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    before = {"name": acct.name, "type": acct.account_type, "ignored": acct.ignored, "archived": bool(acct.archived),
+              "institution": acct.institution, "last4": acct.last4, "alert_pct": acct.alert_pct, "alert_abs": acct.alert_abs}
     if body.name is not None:
         acct.name = _check_name(db, body.name, acct.id)
     if body.account_type is not None:
@@ -149,6 +153,12 @@ def update_account(account_id: int, body: AccountUpdate, db: Session = Depends(g
             acct.alert_pct = _check_alert(body.alert_pct)
         if "alert_abs" in body.model_fields_set:
             acct.alert_abs = _check_alert(body.alert_abs)
+    after = {"name": acct.name, "type": acct.account_type, "ignored": acct.ignored, "archived": bool(acct.archived),
+             "institution": acct.institution, "last4": acct.last4, "alert_pct": acct.alert_pct, "alert_abs": acct.alert_abs}
+    changed = {k: v for k, v in after.items() if before[k] != v}
+    if changed:
+        change_log.record(db, "account", "edit", f"Edited account {change_log.clip(before['name'])} ({', '.join(changed)})",
+                          {"id": acct.id, "before": {k: before[k] for k in changed}, "after": changed})
     db.commit()
     return _account_json(acct)
 
@@ -161,6 +171,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Account not found")
     n = db.query(Balance).filter(Balance.account_id == acct.id).delete()
     import_profile_resolve.unlink_account(db, "balance", account_id)
+    change_log.record(db, "account", "delete", f"Deleted account {change_log.clip(acct.name)} and its {n} balances", {"id": acct.id, "name": acct.name, "balances": n})
     db.delete(acct)
     db.commit()
     return {"deleted": account_id, "balances_deleted": n}

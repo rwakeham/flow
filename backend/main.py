@@ -38,7 +38,7 @@ from security_headers import SameOrigin, SecurityHeaders
 import card_taxonomy
 from database import Base, SessionLocal, engine
 from models import REVOKED_SESSIONS_KEY, SESSION_EPOCH_KEY, AppSetting
-from routers import data, upload, register, backup, cards, ask, balances, cashflow, import_profiles, ai, updates, attention
+from routers import data, upload, register, backup, cards, ask, balances, cashflow, import_profiles, ai, updates, attention, changes
 
 log = logging.getLogger("flow")
 
@@ -175,7 +175,9 @@ async def lifespan(app: FastAPI):
         if not db.execute(text("SELECT 1 FROM schema_migrations WHERE name = :name"),
                           {"name": "card_rules_generic_v1"}).first():
             import card_rules_refresh
-            card_rules_refresh.run(db)
+            counts = card_rules_refresh.run(db)
+            change_log.record(db, "rules", "refresh", "Re-filed stored charges after a merchant-rules update",
+                              counts if isinstance(counts, dict) else None, via="startup")
             db.execute(text("INSERT INTO schema_migrations (name) VALUES (:name)"), {"name": "card_rules_generic_v1"})
             db.commit()
     # The daily check for a newer release runs on its own (update_check.loop: two minutes after
@@ -276,8 +278,10 @@ def _migrate_split_subscriptions_telecom(conn) -> None:
                 ), {"new": new_l1, "l1": l1, "l2": l2, "l3": l3})
 
 
-# No /docs, /redoc or /openapi.json: the API is the app's own, not a public one.
-app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+# No /docs, /redoc or /openapi.json: the API is the app's own, not a public one. change_log.read_via
+# (async: see its docstring) notes on every request who is acting, for the change log.
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None,
+              dependencies=[Depends(change_log.read_via)])
 # Every request body is capped before it is read: 10 MB files plus room for the form around
 # them; a bulk import plan carries up to MAX_BATCH_FILES of them. Added first so the security
 # headers (added after, so outside it) are on its 413s too.
@@ -292,6 +296,7 @@ app.add_exception_handler(import_profile.TooManyRows, too_many_rows)
 
 app.include_router(upload.router)
 app.include_router(attention.router)
+app.include_router(changes.router)
 app.include_router(data.router)
 app.include_router(register.router)
 app.include_router(backup.router)
@@ -363,7 +368,8 @@ def change_password(body: ChangePasswordRequest, response: Response):
     if problem:
         raise HTTPException(status_code=422, detail=problem)
     with SessionLocal() as db:
-        settings_store.set_password(db, body.new)
+        change_log.record(db, "auth", "password", "Password changed; every session ended")
+        settings_store.set_password(db, body.new)      # commits (the change-log row with it)
     clear_session_cookie(response)
     return {"ok": True}
 
@@ -386,6 +392,7 @@ def logout_everywhere(response: Response):
         row = db.get(AppSetting, SESSION_EPOCH_KEY) or AppSetting(key=SESSION_EPOCH_KEY)
         row.value = str(epoch)
         db.add(row)
+        change_log.record(db, "auth", "signout_all", "Signed out everywhere: every session ended")
         db.commit()
     set_session_epoch(epoch)
     set_revoked({})                  # every id is ended by the new generation; the list can go

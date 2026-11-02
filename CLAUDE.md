@@ -32,6 +32,7 @@ backend/                — FastAPI application
   reset_password.py       Host-side password reset: docker compose exec app python reset_password.py
   balance_sheet.py        Balance entry (pure): paste reading, scrubbed AI outline, preview checks, carry-forward
   attention.py            The Dashboard's "Needs attention" panel (pure): the ordered items and where each opens
+  change_log.py           The change log: record() a row with the route's commit, who did it (X-Flow-Via), the cap
   reconciler.py           Bank-to-ledger match suggestions
   import_dedup.py         De-duplication of re-imported bank statements
   import_batch.py         Bulk import: suggests each file's account (pure; no DB)
@@ -72,6 +73,7 @@ backend/                — FastAPI application
     balances.py           /api/balances — paste read (+ AI fallback), preview, apply, single edits, alert settings
     upload.py             /api/import/detect and /api/import/batch/plan (which saved formats read a file)
     attention.py          /api/attention — the Needs attention panel's items, gathered from the other routers
+    changes.py            /api/changes — the change log, newest first, a page at a time
     import_profiles.py    /api/import-profiles — formats, account links, draft, preview, export/import
     register.py           /api/register — cash flow register
     cards.py              /api/cards — card accounts, imports, transactions, analytics, AI
@@ -283,6 +285,19 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   rows open the Cards edit dialog in place (`cfwEditCard`, `CD.onEdited` reloads the diagram), cash rows open
   Sort payees. Assistant: the `cash_flow` lookup and `propose_payee_role` (payee by its lookup label; withheld and
   person-to-person labels are refused). Payee names reach the Assistant only through `AskData.safe`.
+- **Change log** (`change_log.py`, `models.ChangeLog` / table `change_log`, `routers/changes.py`, Settings → Change log in
+  `static/changes.js`): every route that changes data calls `change_log.record(db, kind, action, summary, detail)`
+  before its `db.commit()`, so the row is saved with the change and never without it (where a settings helper
+  commits itself, `record` goes right before the call). Summaries are built in code from `clip`ped names and
+  counts, never multi-line user text (the page still escapes them). `via` is who acted: `ui` (default),
+  `assistant` (the browser's `askApply` sends `X-Flow-Via: assistant`; `read_via` is an app-wide dependency on
+  `FastAPI(dependencies=...)` that MUST stay `async`, because a sync dependency runs in a threadpool with a copied
+  context and its contextvar never reaches the route), `schedule` (the backup loop, `card_ai.run_categorization`)
+  and `startup` (the rules refresh); background and startup writers pass `via` explicitly. Not logged: review
+  ticks, insights, Assistant questions, sign-in, the auto-pre-import backup. The table is NOT in
+  `backup_service.CARD_TABLES`: a restore keeps the log and records itself, and an uploaded backup can't inject
+  rows. `change_log.prune` (newest `MAX_ROWS`, 20,000) runs from the backup loop's tick. Adding a new
+  state-changing route: record there too (see Common tasks).
 - **Needs attention** (`attention.py`, `routers/attention.py`, the `#attention` panel in `index.html` under the metric
   cards): `GET /api/attention` (`X-Flow-Today`) gathers every signal from what the other routers already compute,
   so each count matches the tab its row opens, and `attention.build` (pure) orders them: AI paused
@@ -566,6 +581,9 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
 ## Common tasks
 
 ### Add a new backend endpoint
+
+A route that changes data also records the change: `change_log.record(db, "<kind>", "<action>", "<summary built from
+clipped names and counts>", {<small detail>})` just before its `db.commit()`, so the row is saved with the change.
 
 1. Add the route to the relevant router in `backend/routers/`, or create a new router and
    include it in `main.py`.

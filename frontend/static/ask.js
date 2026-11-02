@@ -247,8 +247,8 @@ function askProposalCard(m, p) {
 async function askApply(m, p, quiet = false) {
   p.error = '';
   try {
-    const res = await fetch(p.apply.url, {method: p.apply.method, headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(p.apply.body)});
+    const res = await fetch(p.apply.url, {method: p.apply.method, body: JSON.stringify(p.apply.body),
+      headers: {'Content-Type': 'application/json', 'X-Flow-Via': 'assistant'}});   // the change log says who did it
     if (!res.ok) {
       let detail = 'Could not apply (' + res.status + ').';
       try { const j = await res.json(); detail = typeof j.detail === 'string' ? j.detail : detail; } catch (e) { /* not JSON */ }

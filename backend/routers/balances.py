@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 import balance_sheet
+import change_log
 import card_ai
 import import_profile as ip
 import import_profile_resolve as resolve
@@ -75,6 +76,8 @@ def put_settings(body: SettingsBody, db: Session = Depends(get_db), today: date 
         row = db.get(AppSetting, key) or AppSetting(key=key)
         row.value = str(v)
         db.add(row)
+    change_log.record(db, "balance", "settings", f"Balance change alerts set to {body.alert_pct:g}% and {change_log.money(body.alert_abs)}",
+                      {"alert_pct": body.alert_pct, "alert_abs": body.alert_abs})
     db.commit()
     return get_settings(db, today)
 
@@ -303,6 +306,8 @@ def marker_from_example(body: ExampleBody, db: Session = Depends(get_db)):
         if balance_sheet.same_spot(t, m, om):
             db.delete(other)
     row, _created = _save_marker(db, m, "user")
+    acct = db.get(Account, body.account_id)
+    change_log.record(db, "balance", "marker", f"Taught where {change_log.clip(acct.name if acct else '')} sits on a pasted summary", {"account_id": body.account_id, "label": m.label_text})
     db.commit()
     return _marker_json(row)
 
@@ -312,6 +317,8 @@ def delete_marker(marker_id: int, db: Session = Depends(get_db)):
     row = db.get(BalanceMarker, marker_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Marker not found")
+    acct = db.get(Account, row.account_id)
+    change_log.record(db, "balance", "marker_delete", f"Removed a paste marker of {change_log.clip(acct.name if acct else '')}", {"account_id": row.account_id, "label": row.label_text})
     db.delete(row)
     db.commit()
 
@@ -434,6 +441,9 @@ def apply(body: ApplyBody, db: Session = Depends(get_db), today: date = Depends(
             m = balance_sheet.marker_for_item(body.text, r.account_id, r.last4, r.amount)
             if m is not None and _save_marker(db, m, "ai")[1]:
                 remembered += 1
+    change_log.record(db, "balance", "apply", f"Applied {len(body.rows)} balance{'s' if len(body.rows) != 1 else ''} for {body.period:%B %Y} ({body.source})",
+                      {"period": body.period.isoformat(), "source": body.source, "accounts": [accounts[r.account_id].name for r in body.rows][:50],
+                       "linked": linked, "remembered": remembered})
     db.commit()
     return {"period": body.period.isoformat(), "written": len(body.rows), "linked": linked, "remembered": remembered}
 
@@ -448,7 +458,8 @@ class OneBalance(BaseModel):
 
 @router.put("")
 def put_balance(body: OneBalance, db: Session = Depends(get_db), today: date = Depends(user_today)):
-    if db.get(Account, body.account_id) is None:
+    acct = db.get(Account, body.account_id)
+    if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
     problem = balance_sheet.period_problem(body.period, today)
     if problem:
@@ -459,6 +470,8 @@ def put_balance(body: OneBalance, db: Session = Depends(get_db), today: date = D
     db.execute(pg_insert(Balance).values(account_id=body.account_id, period=body.period, amount=value, source="manual")
                .on_conflict_do_update(index_elements=["account_id", "period"],
                                       set_={"amount": value, "source": "manual", "updated_at": text("now()")}))
+    change_log.record(db, "balance", "set", f"{change_log.clip(acct.name)} {body.period:%B %Y}: {change_log.money(value)}",
+                      {"account_id": acct.id, "period": body.period.isoformat(), "amount": value})
     db.commit()
     return {"account_id": body.account_id, "period": body.period.isoformat(), "amount": value}
 
@@ -466,6 +479,10 @@ def put_balance(body: OneBalance, db: Session = Depends(get_db), today: date = D
 @router.delete("")
 def delete_balance(account_id: int, period: date, db: Session = Depends(get_db)):
     n = db.query(Balance).filter(Balance.account_id == account_id, Balance.period == period).delete()
+    if n:
+        acct = db.get(Account, account_id)
+        change_log.record(db, "balance", "delete", f"Deleted the {period:%B %Y} balance of {change_log.clip(acct.name if acct else '')}",
+                          {"account_id": account_id, "period": period.isoformat()})
     db.commit()
     if not n:
         raise HTTPException(status_code=404, detail="No balance for that account and period")

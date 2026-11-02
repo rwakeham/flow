@@ -29,6 +29,7 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import change_log
 import settings_store
 from models import REVOKED_SESSIONS_KEY, SESSION_EPOCH_KEY, Account, Balance, Base, RegisterAccount, Transaction
 
@@ -358,8 +359,15 @@ def run_scheduled(session_factory) -> dict:
                                                   settings_store.backup_hour()):
         with session_factory() as db:
             out["created"] = create_backup(db, trigger="scheduled")
+            change_log.record(db, "backup", "scheduled", f"Daily backup {out['created']['id']} taken", {"id": out["created"]["id"]}, via="schedule")
+            db.commit()
         log.info("daily backup taken: %s", out["created"]["id"])
     out["pruned"] = prune_backups(settings_store.backup_keep())
+    with session_factory() as db:
+        if out["pruned"]:
+            change_log.record(db, "backup", "pruned", f"Removed {out['pruned']} old automatic backup{'s' if out['pruned'] != 1 else ''}", {"count": out["pruned"]}, via="schedule")
+            db.commit()
+        change_log.prune(db)                 # the change log's own cap
     if out["pruned"]:
         log.info("retention removed %d automatic backup(s)", out["pruned"])
     return out

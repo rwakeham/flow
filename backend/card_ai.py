@@ -660,6 +660,11 @@ def run_categorization(session_factory, force: bool = False) -> dict | None:
         db = session_factory()
         try:
             outcome = categorize_pending(db, force=force)
+            if outcome.get("classified"):
+                import change_log
+                change_log.record(db, "card", "ai_run", f"AI categorized {outcome['classified']} merchants ({outcome.get('transactions_updated', 0)} charges)",
+                                  {k: v for k, v in outcome.items() if isinstance(v, int)}, via="schedule")
+                db.commit()
         except Exception as exc:  # noqa: BLE001
             db.rollback()
             log.exception("categorization run failed")

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from auth import require_auth
 from database import get_db
 import backup_service
+import change_log
 import settings_store as st
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
@@ -51,15 +52,20 @@ def put_backup_settings(body: BackupSettingsBody, db: Session = Depends(get_db))
     for key, value in changes.items():
         if value is not None and st.setting_source(key) == "env":
             raise HTTPException(status_code=409, detail=st.env_locked_message(st.SETTING_ENV[key]))
-    for key, value in changes.items():
-        if value is not None:
-            st.save_setting(db, key, value)
+    changed = {key: value for key, value in changes.items() if value is not None}
+    if changed:
+        change_log.record(db, "backup", "settings", "Backup settings changed: " + ", ".join(f"{k.removeprefix('backup_')} = {v}" for k, v in changed.items()), changed)
+    for key, value in changed.items():
+        st.save_setting(db, key, value)          # commits (the change-log row with it)
     return settings_payload()
 
 
 @router.post("/backups", status_code=201)
 def create_backup(db: Session = Depends(get_db)):
-    return backup_service.create_backup(db, trigger="manual")
+    info = backup_service.create_backup(db, trigger="manual")
+    change_log.record(db, "backup", "create", f"Backup {info['id']} taken", {"id": info["id"], "size_bytes": info["size_bytes"]})
+    db.commit()
+    return info
 
 
 class DeleteBackupsBody(BaseModel):
@@ -67,13 +73,18 @@ class DeleteBackupsBody(BaseModel):
 
 
 @router.delete("/backups", status_code=204)
-def delete_backups(body: DeleteBackupsBody):
+def delete_backups(body: DeleteBackupsBody, db: Session = Depends(get_db)):
+    deleted = []
     for backup_id in body.ids:
         try:
             path = backup_service.get_backup_path(backup_id)
             path.unlink()
+            deleted.append(backup_id)
         except ValueError:
             pass  # skip missing IDs silently
+    if deleted:
+        change_log.record(db, "backup", "delete", f"Deleted {len(deleted)} backup{'s' if len(deleted) != 1 else ''}", {"ids": deleted[:50]})
+        db.commit()
 
 
 @router.get("/backups/{backup_id}/download")
@@ -129,11 +140,16 @@ def restore_backup(backup_id: str, db: Session = Depends(get_db)):
     settings_store.load(db)              # the restored AI settings (secrets aren't in a backup)
     import update_check
     update_check.load(db)                # the restored update-check result and hidden release
+    info = backup_service.list_backups()
+    when = next((b.get("created_at") for b in info if b.get("id") == backup_id), "")
+    change_log.record(db, "backup", "restore", f"Restored backup {backup_id}" + (f" from {when[:19]}" if when else ""), {"id": backup_id, "created_at": when})
+    db.commit()
     return {"ok": True}
 
 
 @router.post("/backups/upload", status_code=201)
-async def upload_backup(file: UploadFile = File(...), passphrase: str | None = Form(None, max_length=backup_service.PASSPHRASE_MAX)):
+async def upload_backup(file: UploadFile = File(...), passphrase: str | None = Form(None, max_length=backup_service.PASSPHRASE_MAX),
+                        db: Session = Depends(get_db)):
     """A backup zip, or an encrypted copy (.flowbackup) with its passphrase, kept as an uploaded backup."""
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -150,4 +166,7 @@ async def upload_backup(file: UploadFile = File(...), passphrase: str | None = F
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    return backup_service.save_uploaded_backup(content, original_info)
+    saved = backup_service.save_uploaded_backup(content, original_info)
+    change_log.record(db, "backup", "upload", f"Uploaded backup {saved['id']}" + (" (encrypted copy)" if passphrase else ""), {"id": saved["id"], "created_at": saved.get("created_at")})
+    db.commit()
+    return saved

@@ -125,6 +125,14 @@ button:hover { background: var(--surface2); }
   color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
 }
 .chart-wrap { position: relative; width: 100%; min-width: 0; }
+#attention-toggle { border: none; background: none; padding: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+#attention.collapsed #attention-list { display: none; }
+.attention-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: none; background: none;
+  padding: 7px 8px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text); cursor: pointer; }
+.attention-row:hover { background: var(--surface2); }
+.attention-row .acct-behind-count { margin-left: 0; min-width: 28px; text-align: center; }
+.attention-row .go { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.attention-empty { font-size: 13px; color: var(--text-muted); padding: 4px 8px; }
 .chart-wrap canvas { max-width: 100%; }
 .stat-big { font-size: 28px; font-weight: 700; letter-spacing: -1px; margin-bottom: 4px; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
@@ -705,6 +713,15 @@ button:hover { background: var(--surface2); }
       <div class="card-value" id="c-top">—</div>
       <div class="card-delta" id="c-top-d"></div>
     </div>
+  </div>
+
+  <!-- Needs attention (GET /api/attention): hidden until the first reply, then what is waiting, each row a link -->
+  <div id="attention" class="chart-card hidden" style="margin-bottom:16px">
+    <div class="chart-title" style="margin-bottom:0">
+      <button id="attention-toggle" type="button" onclick="attentionToggle()" aria-expanded="true">▾ Needs attention</button>
+      <span id="attention-count" class="acct-behind-count hidden"></span>
+    </div>
+    <div id="attention-list" style="margin-top:8px"></div>
   </div>
 
   <!-- Tabs -->
@@ -2039,7 +2056,7 @@ function baseOpts(yFmt) {
 
 // ── Load everything ───────────────────────────────────────────────────────────
 async function loadAll() {
-  loadVersionInfo();   // the dot on Sign out ▾ when a newer release is known; not awaited
+  loadVersionInfo();   // the dot on Settings when a newer release is known; not awaited
   const [sumRes, tsRes, acctRes, regRes, regTsRes] = await Promise.all([
     fetch('/api/data/summary'),
     fetch('/api/data/timeseries'),
@@ -2061,6 +2078,46 @@ async function loadAll() {
   renderCards(sum);
   renderAccounts();
   if (tsData.periods.length > 0 || regTsData.periods.length > 0) renderAllCharts();
+  loadAttention();     // after the page is drawn; not awaited
+}
+
+// ── Needs attention ──────────────────────────────────────────────────────────
+// What is waiting (GET /api/attention: bank rows to reconcile, accounts behind, charges to review,
+// subscriptions overdue, AI paused, an update ...), each row opening the place to act. Fetched after
+// the Dashboard is drawn, and again whenever the Dashboard is shown.
+const ATTENTION_COLLAPSED = 'flow-attention-collapsed';
+async function loadAttention() {
+  let items;
+  try {
+    const res = await fetch('/api/attention', {headers: {'X-Flow-Today': todayIso()}});
+    if (!res.ok) return;
+    items = (await res.json()).items || [];
+  } catch (e) { return; }
+  renderAttention(items);
+}
+function renderAttention(items) {
+  const panel = document.getElementById('attention'), list = document.getElementById('attention-list');
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(ATTENTION_COLLAPSED) === '1'; } catch (e) { /* storage off */ }
+  panel.classList.toggle('collapsed', collapsed);
+  document.getElementById('attention-toggle').textContent = (collapsed ? '▸' : '▾') + ' Needs attention';
+  document.getElementById('attention-toggle').setAttribute('aria-expanded', String(!collapsed));
+  const count = document.getElementById('attention-count');
+  count.textContent = items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : '';
+  count.classList.toggle('hidden', !(collapsed && items.length));
+  list.innerHTML = items.length ? items.map(i => `<button type="button" class="attention-row" onclick="askNavigate(${escHtml(JSON.stringify(i.nav || null))})">
+      <span class="acct-behind-count">${Number(i.count) || 0}</span><span>${escHtml(String(i.text))}</span><span class="go">open →</span></button>`).join('')
+    : '<div class="attention-empty">Nothing needs attention.</div>';
+  panel.classList.remove('hidden');
+}
+function attentionToggle() {
+  const collapsed = !document.getElementById('attention').classList.contains('collapsed');
+  try { localStorage.setItem(ATTENTION_COLLAPSED, collapsed ? '1' : '0'); } catch (e) { /* storage off */ }
+  const count = document.getElementById('attention-count');
+  document.getElementById('attention').classList.toggle('collapsed', collapsed);
+  document.getElementById('attention-toggle').textContent = (collapsed ? '▸' : '▾') + ' Needs attention';
+  document.getElementById('attention-toggle').setAttribute('aria-expanded', String(!collapsed));
+  count.classList.toggle('hidden', !(collapsed && count.textContent));
 }
 
 // ── Metric cards ──────────────────────────────────────────────────────────────
@@ -2358,6 +2415,7 @@ function showSection(section) {
     document.getElementById(id).classList.toggle('hidden', name !== section);
     document.getElementById('nav-' + name).classList.toggle('active', name === section);
   }
+  if (section === 'dashboard' && !document.getElementById('attention').classList.contains('hidden')) loadAttention();
   if (section === 'cashflow') cfLoadAccounts();
   if (section === 'cards') cdShow();
 }

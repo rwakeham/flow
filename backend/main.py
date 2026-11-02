@@ -38,7 +38,7 @@ from security_headers import SameOrigin, SecurityHeaders
 import card_taxonomy
 from database import Base, SessionLocal, engine
 from models import REVOKED_SESSIONS_KEY, SESSION_EPOCH_KEY, AppSetting
-from routers import data, upload, register, backup, cards, ask, balances, cashflow, import_profiles, ai, updates
+from routers import data, upload, register, backup, cards, ask, balances, cashflow, import_profiles, ai, updates, attention
 
 log = logging.getLogger("flow")
 
@@ -291,6 +291,7 @@ app.add_middleware(SecurityHeaders)
 app.add_exception_handler(import_profile.TooManyRows, too_many_rows)
 
 app.include_router(upload.router)
+app.include_router(attention.router)
 app.include_router(data.router)
 app.include_router(register.router)
 app.include_router(backup.router)

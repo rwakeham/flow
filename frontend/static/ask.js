@@ -155,17 +155,32 @@ function askFormat(text) {
   return frag;
 }
 
+// Also used by the Dashboard's Needs attention rows. nav.action opens a dialog instead of a page:
+// {action:'settings', section} a Settings section; balances = Update balances; import; formats = the formats list.
+const ASK_ACTIONS = {
+  settings: nav => settingsOpen(nav.section),
+  balances: () => balOpen(),
+  import: () => openImport(),
+  formats: () => ipOpenList(),
+};
 function askNavigate(nav) {
   if (!nav) return;
+  if (nav.action) {
+    const fn = ASK_ACTIONS[nav.action];
+    if (fn) fn(nav);
+    return;
+  }
   if (nav.section === 'dashboard') {
     showSection('dashboard');
     const btn = nav.tab && [...document.querySelectorAll('.tab-btn')].find(b => (b.getAttribute('onclick') || '').includes(`'${nav.tab}'`));
     if (btn) btn.click();
     if (nav.payees && typeof cfwOpenPayees === 'function') setTimeout(() => cfwOpenPayees(nav.payees === true ? 'needs' : 'all', nav.payees === true ? '' : nav.payees), 300);
+    if (nav.accounts && !document.getElementById('acct-body').classList.contains('open')) toggleAcctPanel();
     return;
   }
   if (nav.section === 'cashflow') {
-    if (nav.account) openRegisterAccount(nav.account); else showSection('cashflow');
+    if (!nav.account) { showSection('cashflow'); return; }
+    openRegisterAccount(nav.account).then(() => { if (nav.reconcile && !cfReconciling) toggleReconcile(); });
     return;
   }
   if (nav.section === 'cards') {

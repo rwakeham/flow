@@ -29,6 +29,7 @@ backend/                — FastAPI application
                           encrypted API key: flow_secrets) in the database; .env wins while a variable is set
   reset_password.py       Host-side password reset: docker compose exec app python reset_password.py
   balance_sheet.py        Balance entry (pure): paste reading, scrubbed AI outline, preview checks, carry-forward
+  attention.py            The Dashboard's "Needs attention" panel (pure): the ordered items and where each opens
   reconciler.py           Bank-to-ledger match suggestions
   import_dedup.py         De-duplication of re-imported bank statements
   import_batch.py         Bulk import: suggests each file's account (pure; no DB)
@@ -68,6 +69,7 @@ backend/                — FastAPI application
     cashflow.py           /api/cashflow — the Sankey for a period; payee roles (Sort payees)
     balances.py           /api/balances — paste read (+ AI fallback), preview, apply, single edits, alert settings
     upload.py             /api/import/detect and /api/import/batch/plan (which saved formats read a file)
+    attention.py          /api/attention — the Needs attention panel's items, gathered from the other routers
     import_profiles.py    /api/import-profiles — formats, account links, draft, preview, export/import
     register.py           /api/register — cash flow register
     cards.py              /api/cards — card accounts, imports, transactions, analytics, AI
@@ -279,6 +281,21 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   rows open the Cards edit dialog in place (`cfwEditCard`, `CD.onEdited` reloads the diagram), cash rows open
   Sort payees. Assistant: the `cash_flow` lookup and `propose_payee_role` (payee by its lookup label; withheld and
   person-to-person labels are refused). Payee names reach the Assistant only through `AskData.safe`.
+- **Needs attention** (`attention.py`, `routers/attention.py`, the `#attention` panel in `index.html` under the metric
+  cards): `GET /api/attention` (`X-Flow-Today`) gathers every signal from what the other routers already compute,
+  so each count matches the tab its row opens, and `attention.build` (pure) orders them: AI paused
+  (`card_ai.key_problem`), bank rows to reconcile and auto-matches to confirm per cash account
+  (`routers/register.account_signals`, one grouped query shared with `/api/register/accounts`, the reconcile
+  view's rules), balance accounts behind (`routers/data.list_accounts`, not ignored/archived), cash accounts
+  behind, payees needing a role (`routers/cashflow.list_payees`, this year), card charges to review
+  (`routers/cards.review_result` over one `_load` of this year), subscriptions overdue / price change / on two
+  cards (`loaded.recurring_items`: `status`, the "price change" / "up " strings in `change_detected`,
+  "duplicate" in `notes`), formats `needs_preview`, backups (`backup_service.list_backups` newest `created_at`
+  over `BACKUP_OLD_DAYS`, `backup_daily_flag`), the update (`update_check.status`). Each item's `nav` is a shape
+  `askNavigate` (`static/ask.js`) opens: a section (`{section, tab, payees, accounts}`, `{section:'cashflow',
+  account, reconcile}`, `{section:'cards', tab}`) or a dialog (`{action:'settings', section}`, `balances`,
+  `import`, `formats`); `test_attention.known_nav` lists them. The panel is fetched after `loadAll` draws the
+  page and when the Dashboard is shown again; collapsed state in `localStorage`. Text is escaped by the page.
 - **Clear filters**: every filter bar has a "✕ Clear filters" button (`.clear-filters`) shown only while a
   filter differs from its default (Cards bar, Cards transactions, Settings merchants, the register, Cash Flow,
   Sort payees). Add one to any new filter bar.

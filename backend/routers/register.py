@@ -362,24 +362,40 @@ def list_register_accounts(x_flow_today: str | None = Header(None), db: Session 
     """)).fetchall()
     sums: dict[int, float] = {row[0]: float(row[1]) for row in sum_rows}
 
-    # Newest data per account: the latest bank-imported row, else the latest entry of any kind.
-    latest = {aid: (bank, any_) for aid, bank, any_ in db.execute(text("""
-        SELECT register_account_id, MAX(date) FILTER (WHERE source = 'bank'), MAX(date)
-          FROM transactions GROUP BY register_account_id
-    """)).fetchall()}
+    signals = account_signals(db)
     today = balance_sheet.client_today(x_flow_today, DateType.today())
 
     result = []
     for acct in accounts:
         opening, _ = _effective_opening(acct)
         row = _acct_dict(acct, opening + sums.get(acct.id, 0.0))
-        bank, any_ = latest.get(acct.id, (None, None))
+        sig = signals.get(acct.id, {})
+        bank, any_ = sig.get("newest_bank"), sig.get("newest_any")
         newest = bank or any_
         row["latest_date"] = newest.isoformat() if newest else None
         row["latest_source"] = ("bank" if bank else "manual") if newest else None
         row["behind"] = newest is None or (today - newest).days > REGISTER_BEHIND_DAYS
+        row["unmatched"] = sig.get("unmatched", 0)
+        row["pending"] = sig.get("pending", 0)
         result.append(row)
     return result
+
+
+def account_signals(db: Session) -> dict[int, dict]:
+    """Per cash account, in one query: the newest bank-imported row and the newest row of any kind
+    (Manage Accounts' "behind"), and the bank rows waiting in Reconcile: ``unmatched`` (no ledger
+    entry matched, not marked reconciled: the reconcile view's unmatched_bank rule) and ``pending``
+    (auto-matched, awaiting confirmation)."""
+    rows = db.execute(text("""
+        SELECT register_account_id,
+               MAX(date) FILTER (WHERE source = 'bank'),
+               MAX(date),
+               COUNT(*) FILTER (WHERE source = 'bank' AND matched_to_id IS NULL AND NOT is_reconciled),
+               COUNT(*) FILTER (WHERE source = 'bank' AND matched_to_id IS NOT NULL AND NOT is_reconciled)
+          FROM transactions GROUP BY register_account_id
+    """)).fetchall()
+    return {aid: {"newest_bank": bank, "newest_any": any_, "unmatched": int(unmatched), "pending": int(pending)}
+            for aid, bank, any_, unmatched, pending in rows}
 
 
 @router.post("/accounts", status_code=201)

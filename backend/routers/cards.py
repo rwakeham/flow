@@ -1340,13 +1340,19 @@ def analytics_merchants(f: dict = Depends(_filters), db: Session = Depends(get_d
     return card_analytics.merchants(_loaded(f, db).rows)
 
 
-@router.get("/analytics/review")
-def analytics_review(f: dict = Depends(_filters), db: Session = Depends(get_db)):
+def review_result(db: Session, loaded: Loaded, large: float = 500.0) -> dict:
+    """The Review tab's list for the loaded rows: what was ticked off, and every card's name (the
+    co-brand flags need them all, whatever the filter). Shared with the Dashboard's attention panel."""
     reviewed = {i: (at.isoformat(), set(filter(None, (codes or "").split(","))))
                 for i, at, codes in db.query(CardTransaction.id, CardTransaction.reviewed_at, CardTransaction.reviewed_reasons)
                 .filter(CardTransaction.reviewed_at.isnot(None))}
-    names = [n for (n,) in db.query(CardAccount.name)]     # every card, whatever the filter
-    return card_analytics.review(_loaded(f, db).rows, f["large"], reviewed, card_names=names)
+    names = [n for (n,) in db.query(CardAccount.name)]
+    return card_analytics.review(loaded.rows, large, reviewed, card_names=names)
+
+
+@router.get("/analytics/review")
+def analytics_review(f: dict = Depends(_filters), db: Session = Depends(get_db)):
+    return review_result(db, _loaded(f, db), f["large"])
 
 
 class ReviewMark(BaseModel):

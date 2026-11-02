@@ -559,7 +559,9 @@ the proxy settings). For host state:
 `setup.sh` writes the four (the password is required before the first start; once a database volume
 exists it is optional, offered as a reset, since Flow keeps the password itself), then offers the
 Anthropic API key (read hidden; `off` removes the line). The models, switch and redact words are the AI
-dialog's; `setup.sh` no longer asks for them. On a re-run with a database volume, `setup.sh` offers to
+dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
+`${VAR:-}` with a blank default: a non-blank default would reach the app as a set variable and lock the
+setting in the dialog (409). On a re-run with a database volume, `setup.sh` offers to
 remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*` and `FLOW_UPDATE_CHECK` still in `.env` that this run didn't
 just set (`_env_unset`), since Flow has copied them in. `deploy.sh` requires `POSTGRES_PASSWORD` and
 `SECRET_KEY`, requires `FLOW_PASSWORD` only before the first start (no `pgdata` volume by Compose's

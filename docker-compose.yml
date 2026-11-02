@@ -49,8 +49,10 @@ services:
       FLOW_AI_MODEL: ${FLOW_AI_MODEL:-}
       FLOW_AI_MODEL_CATEGORIZE: ${FLOW_AI_MODEL_CATEGORIZE:-}
       FLOW_AI_MODEL_ASK: ${FLOW_AI_MODEL_ASK:-}
-      FLOW_AI_ENABLED: ${FLOW_AI_ENABLED:-1}
+      # Blank, not a default: a value here counts as "set in .env" and locks the setting in the app.
+      FLOW_AI_ENABLED: ${FLOW_AI_ENABLED:-}
       FLOW_AI_REDACT: ${FLOW_AI_REDACT:-}
+      FLOW_UPDATE_CHECK: ${FLOW_UPDATE_CHECK:-}
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:

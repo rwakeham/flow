@@ -634,8 +634,10 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
 - **A release is a tag on `main`**: the run for a push to `main` (`release.yml`, after the tests)
   commits the bump to `backend/VERSION` as `Release <version>`, tags that commit `v<version>` with the
   notes (the commit subjects since the previous release, merges and the bump left out; pull request
-  numbers stay and link) and creates the GitHub Release from it. A bump pushed with the workflow token
-  starts no run, so a release never triggers itself. Actions → Release → Run workflow still works, for
+  numbers stay and link) and creates the GitHub Release from it. `main`'s ruleset requires a pull request
+  and offers no bypass for the workflow token, so the bump is pushed over SSH with a write deploy key on
+  the ruleset's bypass list (the `RELEASE_DEPLOY_KEY` secret; the release README has the setup); its push
+  would start a run, so the bump commit's body says `[skip ci]`. Actions → Release → Run workflow still works, for
   a chosen bump or a dry run. Every pull request runs the same steps as a preview, with the denylist
   required unless the pull request comes from a fork or Dependabot (no repository secrets there). The
   tool and its setup live in `.github/release/` (README there).

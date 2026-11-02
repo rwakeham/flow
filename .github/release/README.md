@@ -35,8 +35,8 @@ Flow is developed and released in this one repository. A release is a tag `v<ver
   merging it would release and whether the tree passes the privacy check. They never commit,
   tag or publish.
 - **Two pushes in a row**: the runs queue. If the first run's bump push finds `main` already
-  moved, it fails and publishes nothing; the second run releases both. A bump pushed with the
-  workflow token starts no run, so a release never triggers itself.
+  moved, it fails and publishes nothing; the second run releases both. The bump commit's body
+  says `[skip ci]` (its push, made with a deploy key, would otherwise start a run of its own).
 - **If a run fails after pushing the bump**, push again or run it by hand: the raised version is
   used as it is, an existing tag is kept, and a missing Release is created.
 
@@ -88,9 +88,13 @@ The denylist reaches it through `$PUBLISH_DENYLIST` (one entry per line) or
    workflow token **Read and write permissions** (the release run commits the version bump,
    pushes the tag and creates the Release).
 3. **Branch protection on `main`** (Settings → Rules → Rulesets): require a pull request and
-   the `test` and `release` status checks, and add a bypass for GitHub Actions so the release
-   run can push the version bump. Check it with a manual **Dry run** first: the push step
-   fails loudly if the bypass is missing.
+   the `test` and `release` status checks. GitHub offers no bypass for the workflow token on a
+   personal repository, so the release run pushes the version bump with a **deploy key**:
+   `ssh-keygen -t ed25519 -N "" -f flow-release-key`, add `flow-release-key.pub` under
+   **Settings → Deploy keys** with **Allow write access**, put the private file's contents in the
+   secret `RELEASE_DEPLOY_KEY`, add **Deploy keys** to the ruleset's bypass list (Add bypass →
+   Others), then delete both local files. The push step fails loudly if the secret or the bypass
+   is missing; a manual **Dry run** stops before it.
 4. **Secret scanning push protection** (Settings → Code security): GitHub's own check at push
    time for API keys and tokens. It complements the denylist, which it doesn't know.
 

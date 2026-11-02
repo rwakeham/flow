@@ -42,6 +42,9 @@ async function aiRender() {
   AI.log = log;
   AI.status = status;
   const st = status.settings, key = st.api_key, locked = k => st[k].source === 'env' ? 'disabled' : '';
+  const isOn = s => !(s.value && ['0', 'false', 'no', 'off'].includes(s.value.toLowerCase()));
+  const areaRow = (k, label, what) => `<label class="cd-check ai-area"><input type="checkbox" id="ai-${k}" ${isOn(st[k]) ? 'checked' : ''} ${locked(k)}>
+    <span><strong>${label}</strong>: ${what}</span></label>${aiEnvNote(st[k])}`;
   const modelField = (k, label, blank) => `<label class="f">${label}</label>
     <input type="text" id="ai-${k}" list="ai-models" value="${aiH(st[k].value)}" placeholder="${aiH(blank)}" ${locked(k)}
       autocomplete="off" spellcheck="false">${aiEnvNote(st[k])}`;
@@ -69,8 +72,15 @@ async function aiRender() {
       <div id="ai-key-msg" class="cd-note"></div>
     </div></div>
     <div class="cd-card"><div class="cd-card-h">Settings</div><div class="cd-card-b">
-      <label class="cd-check"><input type="checkbox" id="ai-ai_enabled" ${st.ai_enabled.value && ['0', 'false', 'no', 'off'].includes(st.ai_enabled.value.toLowerCase()) ? '' : 'checked'} ${locked('ai_enabled')}>
+      <label class="cd-check"><input type="checkbox" id="ai-ai_enabled" ${isOn(st.ai_enabled) ? 'checked' : ''} ${locked('ai_enabled')}>
         AI calls on (off keeps the key but sends nothing)</label>${aiEnvNote(st.ai_enabled)}
+      <div class="ai-areas" id="ai-areas">
+        <div class="cd-note">What the AI may see. Switch an area off and nothing of it is sent: the feature that would
+          send it says so, and the Assistant tells you when a question needs it.</div>
+        ${areaRow('ai_cards', 'Card spending', 'merchant categorization, spending insights and Assistant questions about cards')}
+        ${areaRow('ai_cash', 'Cash accounts', 'Assistant questions about the cash register and cash flow')}
+        ${areaRow('ai_balances', 'Balance sheet', 'reading pasted balances with AI, and Assistant questions about net worth')}
+      </div>
       <datalist id="ai-models">${AI_KNOWN_MODELS.map(m => `<option value="${m}">`).join('')}</datalist>
       ${modelField('ai_model', 'Model for every feature', "Flow's default: " + status.default_model)}
       ${modelField('ai_model_categorize', 'Model for merchant categorization only (a cheaper one such as claude-haiku-5-5 works well)', 'same as every feature: ' + every)}
@@ -91,12 +101,18 @@ async function aiRender() {
         <td><button class="btn-sm" id="ai-log-btn-${i}" onclick="aiToggleLog(${i})">Conversation ▸</button></td></tr>
         <tr id="ai-log-${i}" class="hidden cd-log-row"><td colspan="7"></td></tr>`).join('')}
       </tbody></table></div>` : '<div class="cd-card-b cd-note">Nothing has been sent.</div>'}</div>`;
+  // The area switches mean nothing while the global switch is off: dim them.
+  const global = document.getElementById('ai-ai_enabled');
+  const dim = () => document.getElementById('ai-areas').classList.toggle('dim', !global.checked);
+  global.addEventListener('change', dim);
+  dim();
 }
 
 // ── Settings and the key ─────────────────────────────────────────────────────
-// The Cards page's AI banner reads the same settings: refresh it when it is on screen.
+// The Cards page's AI banner and the Assistant panel read the same settings: refresh them after a change.
 function aiRefreshCards() {
   if (typeof cdPollAi === 'function' && document.getElementById('cd-ai-banner')) cdPollAi();
+  if (typeof askRefreshStatus === 'function') askRefreshStatus();
 }
 
 function aiMsg(id, text, bad) {
@@ -108,8 +124,10 @@ function aiMsg(id, text, bad) {
 
 async function aiSaveSettings() {
   const v = id => document.getElementById('ai-' + id).value;
+  const on = id => document.getElementById('ai-' + id).checked;
   const body = {ai_model: v('ai_model'), ai_model_categorize: v('ai_model_categorize'), ai_model_ask: v('ai_model_ask'),
-                ai_enabled: document.getElementById('ai-ai_enabled').checked, ai_redact: v('ai_redact')};
+                ai_enabled: on('ai_enabled'), ai_cards: on('ai_cards'), ai_cash: on('ai_cash'), ai_balances: on('ai_balances'),
+                ai_redact: v('ai_redact')};
   for (const k of Object.keys(body)) if (AI.status.settings[k].source === 'env') delete body[k];   // .env wins: not sent
   try { await aiSend('/api/ai/settings', 'PUT', body); }
   catch (e) { aiMsg('ai-set-msg', e.message, true); return; }

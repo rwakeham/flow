@@ -51,6 +51,9 @@ services:
       FLOW_AI_MODEL_ASK: ${FLOW_AI_MODEL_ASK:-}
       # Blank, not a default: a value here counts as "set in .env" and locks the setting in the app.
       FLOW_AI_ENABLED: ${FLOW_AI_ENABLED:-}
+      FLOW_AI_CARDS: ${FLOW_AI_CARDS:-}
+      FLOW_AI_CASH: ${FLOW_AI_CASH:-}
+      FLOW_AI_BALANCES: ${FLOW_AI_BALANCES:-}
       FLOW_AI_REDACT: ${FLOW_AI_REDACT:-}
       FLOW_UPDATE_CHECK: ${FLOW_UPDATE_CHECK:-}
       FLOW_BACKUP_DAILY: ${FLOW_BACKUP_DAILY:-}

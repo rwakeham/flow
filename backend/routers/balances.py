@@ -64,7 +64,7 @@ def user_today(x_flow_today: str | None = Header(None)) -> date:
 def get_settings(db: Session = Depends(get_db), today: date = Depends(user_today)):
     th = thresholds(db)
     return {"alert_pct": th.pct, "alert_abs": th.abs, "suggested_period": balance_sheet.current_period(today).isoformat(),
-            "ai": {"enabled": card_ai.enabled(), "reason": card_ai.disabled_reason(),
+            "ai": {"enabled": card_ai.area_enabled("balances"), "reason": card_ai.area_off_reason("balances"),
                    "paused": (card_ai.key_problem(db) or {}).get("message")}}
 
 
@@ -166,7 +166,7 @@ def read_paste_ai(body: PasteBody, db: Session = Depends(get_db)):
     for this). Local readings stand; the AI only fills accounts left unread.
     """
     t = _check_text(body)
-    reason = card_ai.disabled_reason()
+    reason = card_ai.area_off_reason("balances")
     if reason:
         raise HTTPException(status_code=409, detail=reason)
     problem = card_ai.key_problem(db)

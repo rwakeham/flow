@@ -128,10 +128,10 @@ def client(rounds, relevant=True):
     return NS(beta=NS(messages=FakeMessages(rounds, relevant)))
 
 
-def run(rounds, question="Where can I trim spending?", page=None, data=None, history=None):
+def run(rounds, question="Where can I trim spending?", page=None, data=None, history=None, areas=None):
     c, logged = client(rounds), []
     hist = ask.validate_history((history or []) + [{"role": "user", "text": question}])
-    events = list(ask.answer(c, data or fixture(), hist, page, lambda *a: logged.append(a)))
+    events = list(ask.answer(c, data or fixture(), hist, page, lambda *a: logged.append(a), areas=areas))
     return events, c.beta.messages, logged
 
 
@@ -372,6 +372,52 @@ def test_balance_sheet_names_alias_both_ways():
         "Brokerage at Example Bank grew; Brokerage at Example Bank and Example Home together; Example Mortgage fell."
     events, _, _ = run([msg(text("Liability A is down to $198,000."))])
     assert final(events)["text"] == "Example Mortgage is down to $198,000." and final(events)["unverified"] == []
+
+
+# ── Areas switched off under Settings → AI ───────────────────────────────────
+
+def test_areas_off_remove_their_lookups_index_blocks_and_proposals():
+    areas = {"cards": True, "cash": False, "balances": False}
+    events, fake, _ = run([
+        msg(tool("cash_summary", {"account": "", "months": 3}),
+            tool("net_worth", {"months": 0, "account": ""}),
+            tool("subscriptions", {"include_habitual": False})),
+        msg(text("Netflix is $22.99.")),
+    ], areas=areas)
+    c = fake.calls[0]
+    names = {t["name"] for t in c["tools"]}
+    assert not names & {"cash_summary", "cash_flow", "find_cash_transactions", "net_worth", "propose_payee_role"}
+    assert {"spending_breakdown", "propose_merchant_category", "propose_import_profile"} <= names
+    index = json.loads(c["system"][1]["text"].split("\n", 1)[1])
+    assert "cash_accounts" not in index and "net_worth" not in index and index["off"] == ["cash", "balances"]
+    assert index["trim_items"] and index["cards"]
+    prompt = c["system"][0]["text"]
+    assert "Access" in prompt and "cash accounts, balance sheet" in prompt and ask.NEEDS_ACCESS in prompt
+    # A lookup of an area that is off is refused even when called; the rest run.
+    results = fake.calls[1]["messages"][-1]["content"]
+    assert results[0]["is_error"] and "cash accounts area is switched off" in results[0]["content"]
+    assert results[1]["is_error"] and "balance sheet area" in results[1]["content"]
+    assert not results[2].get("is_error") and final(events)["type"] == "final"
+    # Nothing of the cash register or balance sheet reached the model (the prompt's wording aside).
+    assert "Account A" not in c["system"][1]["text"] and "Asset A" not in json.dumps(results)
+    assert "3290" not in json.dumps(fake.calls) and "157290" not in json.dumps(fake.calls)
+    # Every area on: the plain prompt, every tool, no "off" list.
+    _, fake2, _ = run([msg(text("ok"))])
+    assert "Access" not in fake2.calls[0]["system"][0]["text"] and ask.rules() == ask.RULES
+    assert len(fake2.calls[0]["tools"]) == len(ask_data.TOOLS) + len(__import__("ask_proposals").TOOLS)
+    assert "off" not in json.loads(fake2.calls[0]["system"][1]["text"].split("\n", 1)[1])
+
+
+def test_question_needing_an_off_area_is_declined_with_the_area():
+    events, _, _ = run([msg(text("NEEDS_ACCESS: balances."))], areas={"cards": True, "cash": True, "balances": False})
+    f = final(events)
+    assert f["type"] == "declined" and f["kind"] == "access" and f["area"] == "balances"
+    assert "balance sheet" in f["message"] and "Settings → AI" in f["message"]
+    assert ask.declined_message({"cards": True, "cash": False, "balances": False}) == \
+        "The Assistant only helps with your card spending and how Flow organizes them."
+    assert ask.declined_message() == ask.DECLINED_MESSAGE
+    events, _, _ = run([msg(text("NEEDS_ACCESS cards"))])      # nothing is off: the words are just an answer
+    assert final(events)["type"] == "declined" and final(events)["area"] == "cards"
 
 
 # ── Budget ───────────────────────────────────────────────────────────────────
@@ -621,9 +667,14 @@ def test_new_subcategory_names_are_checked():
 
 # ── Router: pause, daily count, refunds, logging ─────────────────────────────
 
-def _router(monkey_problem=None, rounds=(), relevant=True, used=None):
+def _router(monkey_problem=None, rounds=(), relevant=True, used=None, areas=None):
     import routers.ask as R
-    state = {"count": 0 if used is None else used}
+    state = {"count": 0 if used is None else used, "loaded_areas": None}
+    areas = areas or {"cards": True, "cash": True, "balances": True}
+
+    def load(db, areas_=None):
+        state["loaded_areas"] = areas_
+        return fixture()
     c = client(list(rounds), relevant)
     logs = []
     saved = {}
@@ -640,7 +691,8 @@ def _router(monkey_problem=None, rounds=(), relevant=True, used=None):
     patch(R.card_ai, "client_factory", lambda: c)
     patch(R, "_bump", bump)
     patch(R, "meter", lambda db: {"month": "2026-10", "this_month": state["count"], "last_month": 0})
-    patch(R.ask_data, "load", lambda db: fixture())
+    patch(R.card_ai, "areas_enabled", lambda: dict(areas))
+    patch(R.ask_data, "load", load)
     patch(R, "make_logger", lambda db: (lambda *a: logs.append(a)))
     return R, state, c, logs, lambda: [setattr(o, n, v) for (o, n), v in saved.items()]
 
@@ -655,6 +707,22 @@ def test_paused_key_answers_with_reason_and_does_not_count():
         ev = _events(R, [{"role": "user", "text": "Where can I trim?"}])
         assert ev[0]["type"] == "error" and ev[0]["paused"] and state["count"] == 0
         assert c.beta.messages.calls == [] and c.beta.messages.parse_calls == []
+    finally:
+        undo()
+
+
+def test_router_passes_the_areas_to_load_the_status_and_the_answer():
+    areas = {"cards": False, "cash": True, "balances": True}
+    R, state, c, logs, undo = _router(rounds=[msg(text("NEEDS_ACCESS cards"))], areas=areas)
+    try:
+        assert R.ask_status(db=None)["areas"] == areas
+        ev = _events(R, [{"role": "user", "text": "What did I spend on my cards?"}])
+        assert state["loaded_areas"] == areas                               # an area that is off is never read
+        assert ev[-1] == {"type": "declined", "kind": "access", "area": "cards", "message": ask.access_message("cards"),
+                          "usage": {"input_tokens": 1000, "output_tokens": 200},
+                          "meter": {"month": "2026-10", "this_month": 1, "last_month": 0}}
+        assert "spending_breakdown" not in {t["name"] for t in c.beta.messages.calls[0]["tools"]}
+        assert logs[1][4]["areas"] == areas
     finally:
         undo()
 

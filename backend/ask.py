@@ -40,6 +40,10 @@ MAX_HISTORY = 8
 MAX_QUESTION_CHARS = 1000
 MAX_ANSWER_CHARS = 4000
 OFF_TOPIC = "OFF_TOPIC"
+NEEDS_ACCESS = "NEEDS_ACCESS"
+_ACCESS_RE = re.compile(r"^\W*NEEDS_ACCESS\W+(cards|cash|balances)\W*$", re.IGNORECASE)
+AREA_TOPICS = {"cards": "your card spending", "cash": "your cash accounts", "balances": "your net worth"}
+AREA_LABELS = {"cards": "card spending", "cash": "cash accounts", "balances": "balance sheet"}   # card_ai.AREA_LABELS
 DECLINED_MESSAGE = ("The Assistant only helps with your spending, cards, cash accounts, net worth and how Flow "
                     "organizes them.")
 CUT_SHORT = "…(cut short)"
@@ -132,6 +136,38 @@ Style
 - If the question is not about this household's spending, cards, cash accounts, bills, \
 subscriptions, budgeting, net worth and account balances, how Flow organizes them, or how Flow's \
 numbers work, reply with exactly {OFF_TOPIC} and nothing else."""
+
+ACCESS_RULES = """
+
+Access
+- The user switched these data areas off for the AI under Settings → AI: {off}. You have no index block, \
+lookup or proposal for them, and you must not guess at them. If the question needs one of them, reply \
+with exactly {sentinel} <area> and nothing else, where area is cards, cash or balances (the one it needs \
+most). Answer from the areas you have whenever they are enough."""
+
+
+def declined_message(areas: dict | None = None) -> str:
+    """DECLINED_MESSAGE naming only the areas that are on."""
+    on = ask_data.areas_on(areas)
+    topics = [AREA_TOPICS[a] for a in ask_data.AREAS if on[a]]
+    if len(topics) == 3:
+        return DECLINED_MESSAGE
+    return f"The Assistant only helps with {', '.join(topics)} and how Flow organizes them."
+
+
+def access_message(area: str) -> str:
+    return (f"That needs your {AREA_LABELS[area]}, which is switched off for the AI under Settings → AI. "
+            "Turn it on there to ask about it.")
+
+
+def rules(areas: dict | None = None) -> str:
+    """The system prompt: RULES, plus the Access paragraph while an area is switched off."""
+    on = ask_data.areas_on(areas)
+    off = [AREA_LABELS[a] for a in ask_data.AREAS if not on[a]]
+    if not off:
+        return RULES
+    return RULES + ACCESS_RULES.format(off=", ".join(off), sentinel=NEEDS_ACCESS)
+
 
 TOPIC_SYSTEM = """You decide whether a question belongs in the Assistant, a chat panel in Flow, a \
 personal finance app for one household.
@@ -311,14 +347,17 @@ def trim_stuck(text: str) -> str:
 
 
 def answer(client, data: ask_data.AskData, history: list[dict], page: dict | None, log: LogFn,
-           meta: dict | None = None, attachment: dict | None = None) -> Iterator[dict]:
+           meta: dict | None = None, attachment: dict | None = None, areas: dict | None = None) -> Iterator[dict]:
     """
     Stream events for one question: status, text, reset, then exactly one of
-    final, declined or error. ``history`` is validate_history output.
+    final, declined or error. ``history`` is validate_history output. ``areas`` (cards, cash,
+    balances: card_ai.areas_enabled) picks the index blocks, lookups and proposals offered.
     """
     meta = meta or {}
-    index_text = json.dumps(ask_data.build_index(data, page), sort_keys=True)
-    system = [{"type": "text", "text": RULES}, {"type": "text", "text": "INDEX (JSON):\n" + index_text}]
+    index_text = json.dumps(ask_data.build_index(data, page, areas), sort_keys=True)
+    system = [{"type": "text", "text": rules(areas)}, {"type": "text", "text": "INDEX (JSON):\n" + index_text}]
+    tools = ask_data.tools_for(areas) + ask_proposals.tools_for(areas)
+    offered = {t["name"] for t in tools}
     # The browser shows real card and account names; they go back to aliases before anything is sent.
     history = [{**m, "text": ask_data.realias(m["text"], data)} for m in history]
     messages: list[dict] = [{"role": m["role"], "content": m["text"]} for m in history]
@@ -334,7 +373,7 @@ def answer(client, data: ask_data.AskData, history: list[dict], page: dict | Non
     for rnd in range(1, MAX_ROUNDS + 1):
         tools_on = rnd < MAX_ROUNDS and in_total < MAX_INPUT_TOKENS and out_total < MAX_OUTPUT_TOKENS
         kwargs = dict(
-            model=model, max_tokens=ROUND_MAX_TOKENS, system=system, tools=ask_data.TOOLS + ask_proposals.TOOLS,
+            model=model, max_tokens=ROUND_MAX_TOKENS, system=system, tools=tools,
             tool_choice={"type": "auto" if tools_on else "none"}, messages=messages,
             output_config={"effort": "medium"}, cache_control={"type": "ephemeral"},
             **card_ai.fallback_kwargs(model),
@@ -383,6 +422,13 @@ def answer(client, data: ask_data.AskData, history: list[dict], page: dict | Non
             results = []
             lookups = props = 0
             for b in tool_uses:
+                if b.name not in offered:       # a tool of an area that is off, or one that never existed
+                    area = ask_data.TOOL_AREA.get(b.name) or ask_proposals.TOOL_AREA.get(b.name)
+                    why = (f"the {AREA_LABELS[area]} area is switched off under Settings → AI" if area
+                           else "there is no such tool")
+                    results.append({"type": "tool_result", "tool_use_id": b.id, "is_error": True,
+                                    "content": f"Not run: {why}."})
+                    continue
                 if b.name in ask_proposals.TOOL_NAMES:
                     props += 1
                     props_total += 1
@@ -429,7 +475,12 @@ def answer(client, data: ask_data.AskData, history: list[dict], page: dict | Non
 
     usage = {"input_tokens": in_total, "output_tokens": out_total}
     if final_text.strip().strip(".") == OFF_TOPIC:
-        yield {"type": "declined", "message": DECLINED_MESSAGE, "usage": usage}
+        yield {"type": "declined", "message": declined_message(areas), "usage": usage}
+        return
+    access = _ACCESS_RE.match(final_text)
+    if access:
+        area = access.group(1).lower()
+        yield {"type": "declined", "kind": "access", "area": area, "message": access_message(area), "usage": usage}
         return
     if not final_text:
         yield {"type": "error", "message": "No answer was produced."}

@@ -85,7 +85,10 @@ def make_logger(db: Session):
 def ask_status(db: Session = Depends(get_db)):
     problem = card_ai.key_problem(db) if card_ai.enabled() else None
     return {"enabled": card_ai.enabled(), "reason": card_ai.disabled_reason(), "model": card_ai.model_name(card_ai.TASK_ASK),
-            "paused": problem["message"] if problem else None, **meter(db)}
+            "paused": problem["message"] if problem else None, "areas": card_ai.areas_enabled(), **meter(db)}
+
+
+NO_AREAS = "Every data area is switched off for the AI under Settings → AI, so the Assistant has nothing to answer from."
 
 
 def _line(ev: dict) -> bytes:
@@ -112,6 +115,8 @@ async def attach_file(file: UploadFile = File(...), kind: str | None = Form(None
 async def ask_question(request: Request):
     if not card_ai.enabled():
         raise HTTPException(status_code=409, detail=card_ai.disabled_reason())
+    if not any(card_ai.areas_enabled().values()):
+        raise HTTPException(status_code=409, detail=NO_AREAS)
     try:
         body = json.loads(await request.body())
     except (ValueError, UnicodeDecodeError):
@@ -158,18 +163,20 @@ def _run(db: Session, history: list[dict], page: dict, counted: dict, attachment
     meta = {"question_id": uuid.uuid4().hex[:12], "question": history[-1]["text"]}
     ai_log = make_logger(db)
     client = card_ai.client_factory()
-    data = ask_data.load(db)
+    areas = card_ai.areas_enabled()          # what the AI may see: an area that is off is never read
+    data = ask_data.load(db, areas)
     previous = ask_data.realias(history[-2]["text"], data) if len(history) >= 2 else ""
     categories = sorted({r.cat_l1 for r in data.rows})
     question = ask_data.realias(history[-1]["text"], data)
     meta["question"] = question
     meta["attachment"] = bool(attachment)
+    meta["areas"] = areas
     # A question with a statement file attached is about setting up its import format: no topic check.
     if not attachment and ask.topic_gate(client, question, previous, categories, ai_log, meta) is False:
         # Declined questions still count: the check cost a call.
-        yield _line({"type": "declined", "message": ask.DECLINED_MESSAGE, "meter": meter(db)})
+        yield _line({"type": "declined", "message": ask.declined_message(areas), "meter": meter(db)})
         return
-    for ev in ask.answer(client, data, history, page, ai_log, meta, attachment):
+    for ev in ask.answer(client, data, history, page, ai_log, meta, attachment, areas):
         if ev["type"] == "error":
             _bump(db, -1)       # no answer: refund the question
             counted["n"] = 0

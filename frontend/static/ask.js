@@ -31,16 +31,61 @@ function askHistory() {
   return ASK.items.filter(m => m.keep).map(m => ({role: m.role, text: m.text}));
 }
 
-// ── Status, button, meter ─────────────────────────────────────────────────────
+// ── Status, button, banner, meter ─────────────────────────────────────────────
+// The data areas the AI may see (Settings → AI); status.areas says which are on.
+const ASK_AREAS = [['cards', 'Card spending'], ['cash', 'Cash accounts'], ['balances', 'Balance sheet']];
+
 async function askRefreshStatus() {
   try {
     const res = await fetch(ASK_URL + '/status');
     if (!res.ok) return;
     ASK.status = await res.json();
   } catch (e) { return; }
-  document.getElementById('ask-btn').classList.toggle('hidden', !ASK.status.enabled);
-  if (!ASK.status.enabled) askClose();
+  // The button stays while AI is off: the panel says why and offers the way to Settings → AI.
+  document.getElementById('ask-btn').classList.remove('hidden');
   askRenderMeter();
+  askRenderBanner();
+}
+
+function askAreasOff() {
+  const a = (ASK.status && ASK.status.areas) || {};
+  return ASK_AREAS.filter(([k]) => a[k] === false).map(([, label]) => label);
+}
+
+// Whether a question can be sent: AI on, a key, and at least one area the AI may see. Unknown (no status yet) passes.
+function askCanAsk() {
+  const s = ASK.status;
+  if (!s) return true;
+  return !!s.enabled && (!s.areas || Object.values(s.areas).some(Boolean));
+}
+
+function askSettingsButton() {
+  return askEl('button', {class: 'btn-sm', onclick: () => askNavigate({action: 'settings', section: 'ai'})}, 'Open Settings → AI');
+}
+
+function askRenderBanner() {
+  const box = document.getElementById('ask-banner');
+  if (!box || !ASK.status) return;
+  const s = ASK.status, off = askAreasOff();
+  box.replaceChildren();
+  box.className = 'ask-banner';
+  if (!s.enabled) {
+    box.classList.add('warn');
+    box.append(askEl('div', {}, '⚠ AI is off: ' + (s.reason || 'nothing is sent.')), askSettingsButton());
+  } else if (off.length === ASK_AREAS.length) {
+    box.classList.add('warn');
+    box.append(askEl('div', {}, 'The Assistant has no data to answer from: every area is switched off under Settings → AI.'),
+               askSettingsButton());
+  } else {
+    if (s.paused) box.append(askEl('div', {class: 'error'}, '⚠ AI paused: ' + s.paused));
+    if (off.length) box.append(askEl('div', {}, 'Not available to the Assistant: ' + off.join(', ') + ' (Settings → AI).'));
+    if (!s.paused && !off.length) box.classList.add('hidden');
+  }
+  const can = askCanAsk();
+  document.getElementById('ask-q').disabled = !can;
+  document.getElementById('ask-send').disabled = !can || ASK.busy;
+  const sug = document.querySelector('#ask-log .ask-suggest');
+  if (sug) sug.classList.toggle('hidden', !can);
 }
 
 function askSetMeter(m) {
@@ -61,7 +106,6 @@ function askRenderMeter() {
   box.replaceChildren(askEl('div', {class: 'row'}, askEl('span', {class: 'grow'},
     `${n} message${n === 1 ? '' : 's'} sent in ${askMonthName(month)}` +
     (prev ? ` · ${prev} in ${askMonthName(month, -1)}` : ''))));
-  if (ASK.status.paused) box.append(askEl('div', {class: 'ask-note error', style: 'margin-top:6px'}, '⚠ AI paused: ' + ASK.status.paused));
 }
 
 // ── Open / close ──────────────────────────────────────────────────────────────
@@ -112,9 +156,10 @@ function askPage() {
 
 function askSuggestions() {
   const p = askPage();
-  if (p.section === 'cashflow') return ["What's coming out of this account in the next 30 days?",
+  const a = (ASK.status && ASK.status.areas) || {cards: true, cash: true, balances: true};   // areas switched off have no suggestions
+  if (p.section === 'cashflow' && a.cash) return ["What's coming out of this account in the next 30 days?",
     'How did money in and out compare over the last 3 months?', 'Who are my largest payees from this account?'];
-  if (p.section === 'cards') {
+  if (p.section === 'cards' && a.cards) {
     const byTab = {
       monthly: ['Why was my highest month so high?', 'How does last month compare with my typical month?'],
       subscriptions: ['Which subscriptions could I cancel?', 'Did any subscription prices go up?'],
@@ -129,9 +174,12 @@ function askSuggestions() {
     if (p.tab === 'review') return ['Which of my uncategorized merchants can you sort out?', 'Where can I easily trim spending?'];
     return [...(byTab[p.tab] || ['Where is most of my money going?']), 'Where can I easily trim spending?'];
   }
-  if (p.section === 'dashboard' && p.tab !== 'cashflow') return ['How did my net worth change this year?',
-    'Which account grew the most this year?', 'Where can I easily trim spending?'];
-  return ['Where can I easily trim spending?', 'How much did I spend on my cards last month?', 'What subscriptions am I paying for?'];
+  const netWorth = ['How did my net worth change this year?', 'Which account grew the most this year?'];
+  if (p.section === 'dashboard' && p.tab !== 'cashflow' && a.balances) return [...netWorth, ...(a.cards ? ['Where can I easily trim spending?'] : [])];
+  if (a.cards) return ['Where can I easily trim spending?', 'How much did I spend on my cards last month?', 'What subscriptions am I paying for?'];
+  if (a.cash) return ["What's coming out of my cash accounts in the next 30 days?", 'How did money in and out compare over the last 3 months?'];
+  if (a.balances) return netWorth;
+  return [];
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -205,7 +253,10 @@ function askNavigate(nav) {
 function askRenderItem(m) {
   if (m.role === 'user') return askEl('div', {class: 'ask-msg user'}, m.text,
     m.file ? askEl('div', {class: 'ask-msg-file'}, '📎 ' + m.file) : null);
-  if (m.kind === 'declined') return askEl('div', {class: 'ask-note'}, m.text);
+  if (m.kind === 'declined') {
+    // A question that needs an area switched off under Settings → AI: the notice, and the way there.
+    return askEl('div', {class: 'ask-note'}, m.text, m.access ? askSettingsButton() : null);
+  }
   const box = askEl('div', {class: 'ask-msg assistant'}, askFormat(m.text));
   if (m.unverified && m.unverified.length) {
     box.append(askEl('div', {class: 'ask-unverified'},
@@ -299,7 +350,7 @@ function askRenderLog() {
       'Ask about your card spending, cash accounts and net worth, or ask it to organize things ("Maple Street Studio is my ' +
       'pottery class, not shopping"); changes come back as proposals you apply. Answers come only from Flow\'s data; Claude sees summaries ' +
       'with cards shown as "Card A" and balance-sheet accounts as "Asset A", and every request is in the AI privacy log (Settings → AI in the top bar).'));
-    const sug = askEl('div', {class: 'ask-suggest'}, askEl('div', {class: 'lbl'}, 'Try'));
+    const sug = askEl('div', {class: 'ask-suggest' + (askCanAsk() ? '' : ' hidden')}, askEl('div', {class: 'lbl'}, 'Try'));
     askSuggestions().forEach(q => sug.append(askEl('button', {onclick: () => askSend(q)}, q)));
     log.append(sug);
   }
@@ -374,7 +425,7 @@ async function askOpenImportEditor(m, p) {
 
 // ── Sending ───────────────────────────────────────────────────────────────────
 async function askSend(preset) {
-  if (ASK.busy) return;
+  if (ASK.busy || !askCanAsk()) return;
   const input = document.getElementById('ask-q');
   // A pasted account summary goes to the balances dialog, which reads it locally:
   // its amounts and account numbers are never sent to the chat model.
@@ -447,7 +498,8 @@ async function askSend(preset) {
                     proposals: props, keep: true});
   } else if (done.type === 'declined') {
     userItem.keep = false;              // declined questions are not sent back as history
-    ASK.items.push({role: 'assistant', kind: 'declined', text: done.message, keep: false});
+    ASK.items.push({role: 'assistant', kind: 'declined', text: done.message, keep: false,
+                    access: done.kind === 'access' ? done.area : undefined});
   } else {
     ASK.items.pop();                    // failed: drop the question and put it back in the box
     input.value = question;
@@ -459,7 +511,7 @@ async function askSend(preset) {
     if (done.paused) askRefreshStatus();
   }
   ASK.busy = false;
-  document.getElementById('ask-send').disabled = false;
+  document.getElementById('ask-send').disabled = !askCanAsk();
   input.focus();
 }
 

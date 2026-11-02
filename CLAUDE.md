@@ -558,6 +558,27 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   again. One in-memory copy (`settings_store.load` at startup and after a backup restore), one worker.
   The AI dialog (`static/ai.js`, `routers/ai.py`) has the key (save, test, remove), the switch, the three
   models (datalist of known names, validated like `setup.sh` did) and the redact words.
+- **What the AI may see: one switch per data area** (`settings_store.AI_AREAS`: `ai_cards`, `ai_cash`,
+  `ai_balances` → `FLOW_AI_CARDS` / `FLOW_AI_CASH` / `FLOW_AI_BALANCES`, default on, env-lockable like the rest,
+  under the global switch in Settings → AI, `static/ai.js` "What the AI may see"). `card_ai.AREAS` / `AREA_LABELS`,
+  `area_enabled(area)` (= `enabled()` and the area's flag) and `area_off_reason(area)` (the global reason first,
+  then the area's) are the only gates: cards = `categorize_pending`, `generate_insights`, the import preview
+  and queue, `/api/cards/categorize` and `/api/cards/ai/status` (so the Cards banner reads "AI for card spending
+  is switched off"); balances = `/api/balances/read-ai` and the `ai` block of `/api/balances/settings`; cash has
+  no feature outside the Assistant. **Any new AI feature gates on its area, not on `enabled()`.** The Assistant:
+  `routers/ask._run` passes `card_ai.areas_enabled()` to `ask_data.load(db, areas)`, which does not read an area
+  that is off (so nothing of it can reach the index or a lookup), to `build_index` (the area's blocks left out,
+  `"off": [...]` listed) and to `ask.answer`, which offers only `ask_data.tools_for` + `ask_proposals.tools_for`
+  (`TOOL_AREA` in each module; `propose_import_profile` has no area) and answers a call to a tool not offered
+  with an error result. `ask.rules(areas)` appends the Access paragraph: a question needing an off area is
+  answered with exactly `NEEDS_ACCESS <area>`, which `answer` turns into `{"type": "declined", "kind": "access",
+  "area", "message"}` (counted like an off-topic reply); `declined_message(areas)` names only the areas on.
+  `GET /api/ask/status` carries `areas`, and `POST /api/ask` is 409 when all three are off. The panel
+  (`static/ask.js` `askRenderBanner`, `#ask-banner`): the Assistant button stays visible with AI off; the banner
+  says "AI is off: <reason>", "every area is switched off" or "Not available to the Assistant: …" with an
+  "Open Settings → AI" button (`askNavigate({action:'settings', section:'ai'})`), the input is disabled while
+  nothing can be asked (`askCanAsk`), suggestions follow the areas, and an access `declined` item carries the
+  same button. `aiRefreshCards` refreshes the panel after any change in Settings → AI.
 - **Update check** (`update_check.py`, `routers/updates.py`, Settings → Updates in `index.html` / `static/settings.js`): a background
   task started by the lifespan (`update_check.loop`; two minutes after startup, so the deploy's health check
   comes first, then daily) does one GET to GitHub's latest-release endpoint for `update_check.REPO`, server-side
@@ -630,6 +651,9 @@ the proxy settings). For host state:
 | `FLOW_AI_MODEL_CATEGORIZE` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for merchant categorization only (`card_ai.model_name(TASK_CATEGORIZE)`; `ai_model_categorize`) |
 | `FLOW_AI_MODEL_ASK` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for the Assistant's topic gate and answer rounds (`TASK_ASK`; `ai_model_ask`) |
 | `FLOW_AI_ENABLED` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn AI calls off even with a key set (the AI dialog's switch, `ai_enabled`) |
+| `FLOW_AI_CARDS` | `1` (enabled) | `0` keeps card spending from the AI: no categorization, Insights, or Assistant card lookups and proposals (`ai_cards`) |
+| `FLOW_AI_CASH` | `1` (enabled) | `0` keeps the cash register from the AI: no Assistant cash, cash-flow or payee lookups and proposals (`ai_cash`) |
+| `FLOW_AI_BALANCES` | `1` (enabled) | `0` keeps the balance sheet from the AI: no AI reading of pasted balances, no Assistant net worth lookup (`ai_balances`) |
 | `FLOW_AI_REDACT` | *(empty)* | Comma-separated extra words stripped from merchant names before any AI call (the AI dialog's field, `ai_redact`) |
 | `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Settings → Updates has the same switch, `update_check`) |
 | `FLOW_BACKUP_DAILY` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily backup off (Settings → Backups, `backup_daily`) |
@@ -640,8 +664,8 @@ the proxy settings). For host state:
 `SECRET_KEY` blank, so a copied file can't deploy as is; `APP_PORT`), plus the optional ones commented out.
 `setup.sh` writes the four (the password is required before the first start; once a database volume
 exists it is optional, offered as a reset, since Flow keeps the password itself), then offers the
-Anthropic API key (read hidden; `off` removes the line). The models, switch and redact words are the AI
-dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
+Anthropic API key (read hidden; `off` removes the line). The models, switches (global and per area) and
+redact words are the AI dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
 `${VAR:-}` with a blank default: a non-blank default would reach the app as a set variable and lock the
 setting in the dialog (409). On a re-run with a database volume, `setup.sh` offers to
 remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*`, `FLOW_UPDATE_CHECK` and `FLOW_BACKUP_*` still in `.env` that this run didn't

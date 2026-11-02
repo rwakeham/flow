@@ -60,15 +60,24 @@ def test_env_wins_while_set_then_the_store():
     assert st.password_source() == "env"
 
 
-def test_ai_enabled_flag_reads_off_words():
+def test_ai_enabled_flag_reads_off_words(monkeypatch):
     assert st.ai_enabled_flag()
     for word in ("0", "false", "No", "OFF"):
         st.testing_state({st.AI_ENABLED: word})
         assert not st.ai_enabled_flag()
     st.testing_state({st.AI_ENABLED: "1"})
     assert st.ai_enabled_flag()
-    os.environ["FLOW_AI_ENABLED"] = "off"
+    monkeypatch.setenv("FLOW_AI_ENABLED", "off")
     assert not st.ai_enabled_flag()
+
+
+def test_ai_area_flags_default_on_and_read_off_words(monkeypatch):
+    assert all(st.ai_area_flag(a) for a in st.AI_AREAS)
+    st.testing_state({st.AI_CASH: "false"})
+    assert st.ai_area_flag("cards") and not st.ai_area_flag("cash") and st.ai_area_flag("balances")
+    monkeypatch.setenv("FLOW_AI_BALANCES", "0")
+    assert not st.ai_area_flag("balances") and st.setting_source(st.AI_BALANCES) == "env"
+    assert set(st.AI_AREAS.values()) <= set(st.SETTING_ENV)          # stored, exported and env-lockable like the rest
 
 
 class FakeDB:

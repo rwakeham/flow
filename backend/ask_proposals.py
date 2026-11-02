@@ -107,6 +107,14 @@ TOOLS = [
                               "skip_footer_rows": N, "reason": REASON})},
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
+# The data area each proposal reads (ask_data.TOOL_AREA); None = offered whatever is switched off.
+TOOL_AREA = {name: "cards" for name in TOOL_NAMES}
+TOOL_AREA.update({"propose_payee_role": "cash", "propose_import_profile": None})
+
+
+def tools_for(areas: dict | None) -> list[dict]:
+    on = ask_data.areas_on(areas)
+    return [t for t in TOOLS if TOOL_AREA[t["name"]] is None or on[TOOL_AREA[t["name"]]]]
 
 
 CADENCE_WORDS = {"weekly": "week", "biweekly": "2 weeks", "monthly": "month", "bimonthly": "2 months",

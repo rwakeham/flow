@@ -282,9 +282,28 @@ def test_disabled_without_key():
     try:
         assert not card_ai.enabled()
         assert "No Anthropic API key" in card_ai.disabled_reason()
+        assert not card_ai.area_enabled("cards") and "No Anthropic API key" in card_ai.area_off_reason("cards")
     finally:
         if old is not None:
             os.environ["ANTHROPIC_API_KEY"] = old
+
+
+def test_area_switches_gate_each_feature_under_the_global_one():
+    import settings_store as st
+    old = {k: os.environ.pop(k, None) for k in ("ANTHROPIC_API_KEY", "FLOW_AI_ENABLED", "FLOW_AI_CASH")}
+    try:
+        st.testing_state({st.AI_CASH: "0"}, {st.API_KEY: "sk-ant-test-key"})
+        assert card_ai.enabled() and card_ai.areas_enabled() == {"cards": True, "cash": False, "balances": True}
+        assert card_ai.area_off_reason("cards") is None
+        assert card_ai.area_off_reason("cash") == "AI for cash accounts is switched off (Settings → AI in the top bar)."
+        os.environ["FLOW_AI_ENABLED"] = "0"                       # the global switch comes first
+        assert not any(card_ai.areas_enabled().values())
+        assert card_ai.area_off_reason("balances") == "AI calls are switched off."
+    finally:
+        st.testing_state()
+        for k, v in old.items():
+            if v is not None:
+                os.environ[k] = v
 
 
 if __name__ == "__main__":

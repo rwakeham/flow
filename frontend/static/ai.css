@@ -10,3 +10,9 @@
 #settings-ai .ai-row input { flex: 1; min-width: 200px; }
 #settings-ai .ai-env { font-size: 12px; color: var(--text-muted); margin: 4px 0 6px; }
 #settings-ai .cd-check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+/* What the AI may see: one switch per data area, dimmed while the global switch is off. */
+#settings-ai .ai-areas { margin: 8px 0 4px 24px; display: flex; flex-direction: column; gap: 6px; }
+#settings-ai .ai-areas .cd-note { margin-bottom: 2px; }
+#settings-ai .ai-areas.dim { opacity: 0.5; }
+#settings-ai .ai-area { align-items: flex-start; }
+#settings-ai .ai-area input { margin-top: 3px; }

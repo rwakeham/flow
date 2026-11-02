@@ -162,22 +162,39 @@ def realias(text: str, data: AskData) -> str:
     return text
 
 
-def load(db) -> AskData:
-    """Everything Ask can look up, read once per question."""
+AREAS = ("cards", "cash", "balances")      # card_ai.AREAS: what the AI may see, each with its own switch
+ALL_AREAS = {a: True for a in AREAS}
+
+
+def areas_on(areas: dict | None) -> dict[str, bool]:
+    return {a: bool((areas if areas is not None else ALL_AREAS).get(a)) for a in AREAS}
+
+
+def load(db, areas: dict | None = None) -> AskData:
+    """
+    Everything Ask can look up, read once per question. An area switched off under Settings → AI
+    (``areas``: cards, cash, balances) is not read at all, so nothing of it can reach the index or a lookup.
+    """
     import cash_flow
     from models import PayeeRole, RegisterAccount, Transaction
     from recurring import detect_recurring_patterns
     from routers.cards import _load
     from card_ai import _cardholder_names
 
-    ld = _load(db, None, None, None)
-    cov = ld.coverage
-    cards = [Card(cid, ld.card_names[cid], alias("Card", i), *(cov.get(cid) or (None, None)))
-             for i, cid in enumerate(sorted(ld.card_names))]
-    names = _cardholder_names(db)
-    import card_amount_rules
-    data = AskData(today=date.today(), cards=cards, rows=ld.rows, recurring=ld.recurring_items, names=names,
-                   amount_rules=card_amount_rules.load(db))
+    on = areas_on(areas)
+    names = _cardholder_names(db)          # people's names: used only to withhold labels, never sent
+    data = AskData(today=date.today(), cards=[], rows=[], recurring=[], names=names)
+    if on["cards"]:
+        import card_amount_rules
+        ld = _load(db, None, None, None)
+        cov = ld.coverage
+        data.cards = [Card(cid, ld.card_names[cid], alias("Card", i), *(cov.get(cid) or (None, None)))
+                      for i, cid in enumerate(sorted(ld.card_names))]
+        data.rows, data.recurring, data.amount_rules = ld.rows, ld.recurring_items, card_amount_rules.load(db)
+    if on["balances"]:
+        load_balances(db, data)
+    if not on["cash"]:
+        return data
 
     redact = card_privacy.Redaction(names=names)
     for i, acct in enumerate(db.query(RegisterAccount).order_by(RegisterAccount.id).all()):
@@ -201,7 +218,6 @@ def load(db) -> AskData:
                                           p.frequency))
     data.payee_roles = {r.key: cash_flow.Role(r.role, r.category or "", r.target or "")
                         for r in db.query(PayeeRole).all()}
-    load_balances(db, data)
     return data
 
 
@@ -512,38 +528,47 @@ def page_context(data: AskData, page: dict | None) -> dict:
     return out
 
 
-def build_index(data: AskData, page: dict | None) -> dict:
-    lo, hi = window(data, 6)
-    s6 = [r for r in spend(data.rows) if lo <= r.date <= hi]
-    total6 = sum(r.spend for r in s6)
-    months = _months_between(lo, hi)
-    by_l1: dict[str, float] = defaultdict(float)
-    for r in s6:
-        by_l1[r.cat_l1] += r.spend
-    lo12, _ = window(data, 12)
-    by_month: dict[str, float] = defaultdict(float)
-    for r in spend(data.rows):
-        if r.date >= lo12:
-            by_month[card_analytics.month_key(r.date)] += r.spend
-    balances = cash_balances(data)
-    return clean({
-        "today": data.today,
-        "cards": [{"card": c.alias, "data_from": c.start, "data_to": c.end,
-                   "transactions": sum(1 for r in data.rows if r.card_account_id == c.id)} for c in data.cards],
-        "cash_accounts": [{"account": a.alias, **balances.get(a.id, {})} for a in data.cash],
-        "net_worth": net_worth_index(data),
-        "card_spending_by_category": {
-            "period": f"{lo.isoformat()} to {hi.isoformat()}", "total": total6,
-            "rows": [{"category": k, "total": v, "monthly_avg": v / months,
-                      "share_pct": (v / total6 * 100) if total6 else 0.0}
-                     for k, v in sorted(by_l1.items(), key=lambda kv: -kv[1])]},
-        "card_net_spend_by_month": [{"month": m, "net": v} for m, v in sorted(by_month.items())],
-        "category_list": {"top_level_categories": len(card_taxonomy.CHOOSABLE_L1),
-                          "subcategories": sum(len(card_taxonomy.tree().get(c, {})) for c in card_taxonomy.CHOOSABLE_L1),
-                          "lookup": "categories"},
-        "trim_items": [trim_summary(it) for it in trim_items(data)[:8]],
-        "page": page_context(data, page),
-    })
+def build_index(data: AskData, page: dict | None, areas: dict | None = None) -> dict:
+    """The index: each area's summary while that area is on (``areas``), and which areas are off."""
+    on = areas_on(areas)
+    index: dict = {"today": data.today}
+    if on["cards"]:
+        lo, hi = window(data, 6)
+        s6 = [r for r in spend(data.rows) if lo <= r.date <= hi]
+        total6 = sum(r.spend for r in s6)
+        months = _months_between(lo, hi)
+        by_l1: dict[str, float] = defaultdict(float)
+        for r in s6:
+            by_l1[r.cat_l1] += r.spend
+        lo12, _ = window(data, 12)
+        by_month: dict[str, float] = defaultdict(float)
+        for r in spend(data.rows):
+            if r.date >= lo12:
+                by_month[card_analytics.month_key(r.date)] += r.spend
+        index.update({
+            "cards": [{"card": c.alias, "data_from": c.start, "data_to": c.end,
+                       "transactions": sum(1 for r in data.rows if r.card_account_id == c.id)} for c in data.cards],
+            "card_spending_by_category": {
+                "period": f"{lo.isoformat()} to {hi.isoformat()}", "total": total6,
+                "rows": [{"category": k, "total": v, "monthly_avg": v / months,
+                          "share_pct": (v / total6 * 100) if total6 else 0.0}
+                         for k, v in sorted(by_l1.items(), key=lambda kv: -kv[1])]},
+            "card_net_spend_by_month": [{"month": m, "net": v} for m, v in sorted(by_month.items())],
+            "category_list": {"top_level_categories": len(card_taxonomy.CHOOSABLE_L1),
+                              "subcategories": sum(len(card_taxonomy.tree().get(c, {})) for c in card_taxonomy.CHOOSABLE_L1),
+                              "lookup": "categories"},
+            "trim_items": [trim_summary(it) for it in trim_items(data)[:8]],
+        })
+    if on["cash"]:
+        balances = cash_balances(data)
+        index["cash_accounts"] = [{"account": a.alias, **balances.get(a.id, {})} for a in data.cash]
+    if on["balances"]:
+        index["net_worth"] = net_worth_index(data)
+    off = [a for a in AREAS if not on[a]]
+    if off:
+        index["off"] = off
+    index["page"] = page_context(data, page)
+    return clean(index)
 
 
 def cash_balances(data: AskData) -> dict[int, dict]:
@@ -711,6 +736,15 @@ TOOLS = [
      "input_schema": _schema({"months": I, "account": S})},
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
+# The data area each lookup reads; a lookup is offered only while its area is on.
+TOOL_AREA = {"trim_details": "cards", "spending_breakdown": "cards", "categories": "cards", "subscriptions": "cards",
+             "find_card_transactions": "cards", "cash_summary": "cash", "cash_flow": "cash",
+             "find_cash_transactions": "cash", "net_worth": "balances"}
+
+
+def tools_for(areas: dict | None) -> list[dict]:
+    on = areas_on(areas)
+    return [t for t in TOOLS if on[TOOL_AREA[t["name"]]]]
 
 
 def describe(name: str, args: dict, data: AskData) -> str:

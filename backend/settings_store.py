@@ -44,6 +44,9 @@ AI_MODEL = "ai_model"
 AI_MODEL_CATEGORIZE = "ai_model_categorize"
 AI_MODEL_ASK = "ai_model_ask"
 AI_ENABLED = "ai_enabled"
+AI_CARDS = "ai_cards"                # what the AI may see, each on unless switched off (card_ai.AREAS):
+AI_CASH = "ai_cash"                  #   card spending, the cash register, the balance sheet
+AI_BALANCES = "ai_balances"
 AI_REDACT = "ai_redact"
 UPDATE_CHECK = "update_check"
 BACKUP_DAILY = "backup_daily"        # the daily backup (backup_service.loop): on unless switched off
@@ -54,6 +57,9 @@ SETTING_ENV = {
     AI_MODEL_CATEGORIZE: "FLOW_AI_MODEL_CATEGORIZE",
     AI_MODEL_ASK: "FLOW_AI_MODEL_ASK",
     AI_ENABLED: "FLOW_AI_ENABLED",
+    AI_CARDS: "FLOW_AI_CARDS",
+    AI_CASH: "FLOW_AI_CASH",
+    AI_BALANCES: "FLOW_AI_BALANCES",
     AI_REDACT: "FLOW_AI_REDACT",
     UPDATE_CHECK: "FLOW_UPDATE_CHECK",
     BACKUP_DAILY: "FLOW_BACKUP_DAILY",
@@ -63,6 +69,7 @@ SETTING_ENV = {
 BACKUP_KEEP_DEFAULT, BACKUP_KEEP_MAX = 30, 3650
 BACKUP_HOUR_DEFAULT = 3
 MODEL_SETTINGS = (AI_MODEL, AI_MODEL_CATEGORIZE, AI_MODEL_ASK)
+AI_AREAS = {"cards": AI_CARDS, "cash": AI_CASH, "balances": AI_BALANCES}
 
 PASSWORD_HASH = "password_hash"
 API_KEY = "anthropic_api_key"
@@ -96,6 +103,11 @@ def setting_source(key: str) -> str | None:
 def ai_enabled_flag() -> bool:
     v = setting(AI_ENABLED).lower()
     return v not in OFF_WORDS
+
+
+def ai_area_flag(area: str) -> bool:
+    """Whether the AI may see one data area (cards, cash, balances): on unless switched off."""
+    return setting(AI_AREAS[area]).lower() not in OFF_WORDS
 
 
 def update_check_flag() -> bool:

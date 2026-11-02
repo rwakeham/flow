@@ -112,6 +112,31 @@ def disabled_reason() -> str | None:
     return None
 
 
+# What the AI may see, each with its own switch under Settings → AI (settings_store.AI_AREAS):
+# cards = categorization, Insights and the Assistant's card lookups and proposals; cash = the Assistant's
+# register and cash-flow lookups; balances = reading pasted balances and the Assistant's net worth lookup.
+AREAS = ("cards", "cash", "balances")
+AREA_LABELS = {"cards": "Card spending", "cash": "Cash accounts", "balances": "Balance sheet"}
+
+
+def area_enabled(area: str) -> bool:
+    return enabled() and settings_store.ai_area_flag(area)
+
+
+def area_off_reason(area: str) -> str | None:
+    """Why an AI feature over this area may not run: the global switch or key first, then the area's switch."""
+    reason = disabled_reason()
+    if reason:
+        return reason
+    if not settings_store.ai_area_flag(area):
+        return f"AI for {AREA_LABELS[area].lower()} is switched off (Settings → AI in the top bar)."
+    return None
+
+
+def areas_enabled() -> dict[str, bool]:
+    return {area: area_enabled(area) for area in AREAS}
+
+
 def key_fingerprint() -> str | None:
     """A short one-way hash of the configured key, so a stored failure can tell whether the key changed since."""
     key = settings_store.api_key()
@@ -575,7 +600,7 @@ def categorize_pending(db: Session, client=None, force: bool = False) -> dict:
               "batches": 0, "reused": 0, "unanswered": 0, "error": None}
     # Spellings of merchants already categorized need no call; this is local.
     result["reused"] = resolve_from_cache(db)
-    reason = disabled_reason()
+    reason = area_off_reason("cards")
     if reason:
         result["error"] = reason
         return result
@@ -683,7 +708,7 @@ def run_categorization(session_factory, force: bool = False) -> dict | None:
 # ── Insights ─────────────────────────────────────────────────────────────────
 
 def generate_insights(db: Session, payload: dict, client=None) -> tuple[InsightReport, AiRequestLog]:
-    reason = disabled_reason()
+    reason = area_off_reason("cards")
     if reason:
         raise AiError(reason)
     problem = key_problem(db)

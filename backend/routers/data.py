@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -6,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import balance_sheet
+import exports
 from auth import require_auth
 from database import get_db
 import import_profile_resolve
@@ -176,6 +178,24 @@ def account_balances(account_id: int, db: Session = Depends(get_db)):
         "balances": [{"period": b.period.isoformat(), "amount": float(b.amount), "source": b.source,
                       "updated_at": b.updated_at.isoformat() if b.updated_at else None} for b in rows],
     }
+
+
+@router.get("/data/export.csv")
+def export_balances_csv(layout: Literal["long", "wide"] = "long", db: Session = Depends(get_db)):
+    """The balance sheet as CSV. ``long``: every stored balance as it is (account, period, amount,
+    source). ``wide``: one row per month and a column per account as the Dashboard draws them
+    (carried values filled in and named in the last column), with the assets, liabilities and net
+    worth totals (ignored accounts left out of them). Cash register accounts are not here: the
+    register has its own export."""
+    if layout == "long":
+        rows = [{"account": a.name, "type": a.account_type, "institution": a.institution, "period": b.period.isoformat(),
+                 "amount": b.amount, "source": b.source, "updated_at": b.updated_at.isoformat() if b.updated_at else "",
+                 "ignored": a.ignored, "archived": a.archived}
+                for b, a in db.query(Balance, Account).join(Account, Account.id == Balance.account_id)
+                .order_by(Account.name, Balance.period).all()]
+        return exports.csv_response(exports.BALANCES_LONG_COLUMNS, exports.balances_long_rows(rows), "balances-long")
+    header, rows = exports.balances_wide_rows(*balance_matrix(db))
+    return exports.csv_response(header, rows, "balances-wide")
 
 
 # ── Timeseries ────────────────────────────────────────────────────────────────

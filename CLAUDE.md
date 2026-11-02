@@ -21,6 +21,8 @@ backend/                — FastAPI application
   database.py             DB engine and session factory (reads DATABASE_URL)
   cash_flow.py            Cash flow Sankey (pure): payee keys and roles, card-payment/transfer matching, the diagram
   asset_versions.py       Content-hash ?v= on index.html's /static references (cache-busting)
+  exports.py              CSV exports (pure): formula-safe cells, csv_response, the register / balance-sheet
+                          row builders; spreadsheet_safe and download_disposition live here
   VERSION                 Flow's version, MAJOR.MINOR.PATCH: the only place it is written (see Releases)
   version.py              Reads VERSION (APP_VERSION; "unknown" if missing or malformed)
   update_check.py         Daily check of GitHub's latest release against APP_VERSION: strict reply parsing and the
@@ -56,7 +58,7 @@ backend/                — FastAPI application
   card_ai.py              Anthropic API: merchant categorization and aggregate-only insights
   card_amount_rules.py    Category by amount range, per merchant or per category
   card_recurring.py       Subscription / recurring-charge detection
-  card_analytics.py       Spend analytics tables and the insights payload
+  card_analytics.py       Spend analytics tables, the insights payload and the year-end summary (year_summary)
   ask.py                  Assistant chat (code name "ask"): history checks, topic gate, streamed tool loop, number check
   ask_data.py             Assistant's index, trim list and lookup tools (summaries; aliases; cleaned names)
   ask_proposals.py        Assistant's propose_* tools: checked change proposals the user applies
@@ -296,6 +298,18 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   account, reconcile}`, `{section:'cards', tab}`) or a dialog (`{action:'settings', section}`, `balances`,
   `import`, `formats`); `test_attention.known_nav` lists them. The panel is fetched after `loadAll` draws the
   page and when the Dashboard is shown again; collapsed state in `localStorage`. Text is escaped by the page.
+- **CSV exports** (`exports.py`): every export goes through `exports.csv_response(header, rows, name)`, which
+  writes floats with two decimals, ints as they are, booleans as yes/blank, None blank and text through
+  `spreadsheet_safe` (a leading `'` before = + - @, so an amount must be a number, never a string: a "-12.50"
+  string would be quoted); the filename comes from `download_disposition` (any text). The card transactions
+  (`routers/cards` `/export.csv`), the register (`/api/register/{id}/export.csv`: the rows
+  `_compute_running_balance` returns, so the balance column is the page's, filters not applied), the balance
+  sheet (`/api/data/export.csv?layout=long|wide`: `wide` is `balance_matrix` with carried values filled and
+  named in a `carried` column, totals as `summarize`, ignored accounts shown but left out of them; cash
+  accounts are not in it) and the year-end summary (`/api/cards/export-year.csv?year=`:
+  `card_analytics.year_summary` over every card's `SPEND_TYPES` rows and `cash_flow.tag`'s cash `spend`
+  entries, `tax_note` by original built-in names through `Row.b2`: giving, taxes, medical, insurance,
+  tuition; Cards → Settings → Export has the year picker, `cdYears` from the cards' coverage).
 - **Clear filters**: every filter bar has a "✕ Clear filters" button (`.clear-filters`) shown only while a
   filter differs from its default (Cards bar, Cards transactions, Settings merchants, the register, Cash Flow,
   Sort payees). Add one to any new filter bar.

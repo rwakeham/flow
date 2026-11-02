@@ -74,6 +74,58 @@ class Row:
         return card_taxonomy.base(self.cat_l1, self.cat_l2, self.cat_l3)[2]
 
 
+# ── The year-end summary (Cards → Settings → Export) ─────────────────────────
+
+# What a category is for at tax time, by the ORIGINAL built-in names (card_taxonomy.base): a renamed
+# subcategory keeps its note, a custom one under these L1s gets the L1's.
+_TAX_L1 = {"Giving": "giving", "Government & Taxes": "taxes"}
+_TAX_L2 = {("Health & Personal", "Medical"): "medical", ("Health & Personal", "Dental"): "medical",
+           ("Health & Personal", "Pharmacy"): "medical", ("Financial / Investment", "Insurance"): "insurance",
+           ("Education / Family", "Tuition"): "tuition"}
+
+
+def tax_note(l1: str, base_l2: str = "") -> str:
+    return _TAX_L2.get((l1, base_l2)) or _TAX_L1.get(l1, "")
+
+
+def year_summary(rows: list[Row], cash_entries: list, year: int) -> list[dict]:
+    """Spending in a calendar year by category and subcategory: card charges (SPEND_TYPES: purchases,
+    refunds, benefit credits, fees) and, from cash_flow.tag's entries, spending paid from the cash
+    accounts (group "spend", a payee-role category with the payee as the subcategory). Each row:
+    source, category, subcategory, tax_note, net, gross (money out), refunds (money back), count
+    (money-out rows) and net by month; card rows first, largest net first. Pure."""
+    out: dict[tuple, dict] = {}
+
+    def bucket(source: str, category: str, sub: str, note: str) -> dict:
+        return out.setdefault((source, category, sub), {
+            "source": source, "category": category, "subcategory": sub, "tax_note": note,
+            "net": 0.0, "gross": 0.0, "refunds": 0.0, "count": 0, "months": [0.0] * 12})
+
+    def add(d: dict, when: date, amount: float) -> None:
+        d["net"] += amount
+        d["months"][when.month - 1] += amount
+        if amount > 0:
+            d["gross"] += amount
+            d["count"] += 1
+        else:
+            d["refunds"] += -amount
+
+    for r in spend_rows(rows):
+        if r.date.year == year:
+            add(bucket("card", r.cat_l1, r.cat_l2, tax_note(r.cat_l1, r.b2)), r.date, r.spend)
+    for e in cash_entries:
+        if e.source != "cash" or e.group != "spend" or e.date.year != year:
+            continue
+        category = e.detail[:-7] if e.detail.endswith(" (cash)") else e.detail
+        add(bucket("cash", category, e.sub or "", tax_note(category)), e.date, float(e.amount))
+    result = sorted(out.values(), key=lambda d: (d["source"] != "card", -d["net"], d["category"], d["subcategory"]))
+    for d in result:
+        for k in ("net", "gross", "refunds"):
+            d[k] = round(d[k], 2)
+        d["months"] = [round(m, 2) for m in d["months"]]
+    return result
+
+
 def r2(x: float | None) -> float | None:
     return None if x is None else round(float(x), 2)
 

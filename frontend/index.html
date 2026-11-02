@@ -788,7 +788,9 @@ button:hover { background: var(--surface2); }
     <div id="acct-head" style="display:flex;align-items:center;gap:8px">
       <button id="acct-toggle" onclick="toggleAcctPanel()">▸ Manage Accounts</button>
       <button class="btn-sm" onclick="balOpenAccount()" style="white-space:nowrap">+ New balance account</button>
-      <button class="btn-primary btn-sm" onclick="balOpen()" style="white-space:nowrap;margin-right:10px">Update balances</button>
+      <button class="btn-primary btn-sm" onclick="balOpen()" style="white-space:nowrap">Update balances</button>
+      <button class="btn-sm" onclick="downloadUrl('/api/data/export.csv?layout=wide')" style="white-space:nowrap" title="One row per month, a column per balance account as the charts draw them, and the assets / liabilities / net worth totals. Cash accounts export from the register.">↓ CSV by month</button>
+      <button class="btn-sm" onclick="downloadUrl('/api/data/export.csv?layout=long')" style="white-space:nowrap;margin-right:10px" title="Every balance ever entered, one row each: account, month, amount, where it came from.">↓ CSV every balance</button>
     </div>
     <div id="acct-body">
       <div id="acct-list"></div>
@@ -808,6 +810,7 @@ button:hover { background: var(--surface2); }
     <button onclick="cfToggleBankSubs()" id="cf-banksubs-btn" style="display:none">⇌ Show matched</button>
     <button onclick="openAddTxn()" id="cf-add-txn-btn" style="display:none" class="btn-primary">+ Add Transaction</button>
     <button onclick="openMgmtAcct()" id="cf-manage-btn" style="display:none">⚙ Manage</button>
+    <button onclick="cfExportCsv()" id="cf-export-btn" style="display:none" title="Every row after the cutoff with the running balance, as the register shows it. The search box and filters here don't apply.">↓ CSV</button>
     <span id="cf-balance-summary" style="margin-left:auto;font-size:13px;color:var(--text-muted)"></span>
   </div>
 
@@ -2543,12 +2546,27 @@ function _setupDescAutocomplete(inputId, listId, amountId = null) {
   }
 }
 
+// ↓ CSV: the whole ledger of the open account (GET /api/register/{id}/export.csv), named after it.
+function cfExportCsv() {
+  if (!cfCurrentId) return;
+  downloadUrl(`/api/register/${encodeURIComponent(cfCurrentId)}/export.csv`);
+}
+function downloadUrl(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function cfUpdateToolbar() {
   const has = !!cfCurrentId;
   document.getElementById('cf-reconcile-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-banksubs-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-add-txn-btn').style.display = has ? '' : 'none';
   document.getElementById('cf-manage-btn').style.display = has ? '' : 'none';
+  document.getElementById('cf-export-btn').style.display = has ? '' : 'none';
   if (has) {
     const v = fmtFull(cfBalances.verified_balance);
     const f = fmtFull(cfBalances.forecast_balance);

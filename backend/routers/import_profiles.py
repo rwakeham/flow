@@ -11,7 +11,6 @@ imported one is marked ``needs_preview`` until it has read a real file.
 
 from __future__ import annotations
 
-from urllib.parse import quote
 
 import json
 
@@ -21,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import exports
 from auth import require_auth
 from database import get_db
 import import_infer
@@ -191,17 +191,7 @@ def export_profile(profile_id: int, db: Session = Depends(get_db)):
                     headers={"Content-Disposition": download_disposition(row.name, ".flow-format.json")})
 
 
-def download_disposition(name: str, suffix: str) -> str:
-    """
-    Content-Disposition for a download named after something the user typed. HTTP headers carry
-    Latin-1 only, so the plain filename keeps ASCII letters, digits, space, - and _ (a name in
-    Cyrillic or Chinese used to fail with a 500); filename* (RFC 6266) carries the real name in
-    UTF-8 for browsers that read it.
-    """
-    ascii_name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in " -_" else "_" for ch in name).strip(" _")
-    real = "".join(ch for ch in name if ch.isprintable() and ch not in '/\\"').strip() or "format"
-    return (f'attachment; filename="{ascii_name or "format"}{suffix}"; '
-            f"filename*=UTF-8''{quote(real + suffix, safe='')}")
+download_disposition = exports.download_disposition      # shared with the CSV exports; kept importable from here
 
 
 @router.post("/import", status_code=201)

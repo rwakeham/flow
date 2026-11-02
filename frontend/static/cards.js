@@ -1359,9 +1359,24 @@ async function cdRenderSettings(panel) {
       <tbody id="cd-merch-body"></tbody></table></div></div>
 
     <div class="cd-card"><div class="cd-card-h">Export</div><div class="cd-card-b cd-note">
-      <a href="/api/cards/export.csv?${cdQS({}, {noCommon: true})}">Download normalized transactions (CSV)</a> for the cards and period selected above, in the card-spend-analyzer layout (spend positive).</div></div>`;
+      <div><a href="/api/cards/export.csv?${cdQS({}, {noCommon: true})}">Download normalized transactions (CSV)</a> for the cards and period selected above, in the card-spend-analyzer layout (spend positive).</div>
+      <div style="margin-top:8px">Year-end summary for <select id="cd-year" onchange="cdYearLink()" style="width:auto;padding:3px 6px">${cdYears().map(y => `<option value="${y}">${y}</option>`).join('')}</select>:
+        <a id="cd-year-link" href="/api/cards/export-year.csv?year=${cdYears()[0]}">Download (CSV)</a>. Spending by category and subcategory with a column per month, every card, plus what was paid from the cash accounts by payee role; giving, taxes, medical, insurance and tuition are marked for tax time.</div></div></div>`;
   cdFilterMerchants();
   cdRnL1();
+}
+// The years the cards cover (newest first), for the year-end summary; this year when nothing is known.
+function cdYears() {
+  const years = new Set([new Date().getFullYear()]);
+  for (const a of CD.accounts || []) for (const d of [a.first_date, a.last_date]) if (d) years.add(parseInt(d.slice(0, 4), 10));
+  const [lo, hi] = [Math.min(...years), Math.max(...years)];
+  const out = [];
+  for (let y = hi; y >= lo; y--) out.push(y);
+  return out;
+}
+function cdYearLink() {
+  const y = parseInt(document.getElementById('cd-year').value, 10);
+  document.getElementById('cd-year-link').href = '/api/cards/export-year.csv?year=' + (Number.isFinite(y) ? y : new Date().getFullYear());
 }
 function cdRnL1() {
   const l1 = document.getElementById('cd-rn-l1').value;

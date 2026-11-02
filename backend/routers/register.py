@@ -19,6 +19,7 @@ from auth import require_auth
 import balance_sheet
 from backup_service import ensure_daily_backup
 from database import get_db
+import exports
 import import_profile_resolve
 from import_dedup import (
     best_other_account,
@@ -523,6 +524,22 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     result["cutoff_date"] = acct.cutoff_date.isoformat() if acct.cutoff_date else None
     result["cutoff_balance"] = float(acct.cutoff_balance) if acct.cutoff_balance is not None else None
     return result
+
+
+@router.get("/{account_id}/export.csv")
+def export_register_csv(account_id: int, db: Session = Depends(get_db)):
+    """The account's ledger as CSV: every row after the cutoff with the running balance as the
+    register shows it (manual rows and unmatched bank rows count; a matched bank row is listed with
+    the balance unchanged). The page's search and filters don't apply."""
+    acct = db.get(RegisterAccount, account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    opening, cutoff_date = _effective_opening(acct)
+    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
+    if cutoff_date:
+        query = query.filter(Transaction.date >= cutoff_date)
+    result = _compute_running_balance(opening, query.all())
+    return exports.csv_response(exports.REGISTER_COLUMNS, exports.register_rows(result["transactions"]), acct.name)
 
 
 @router.post("/{account_id}/transactions", status_code=201)

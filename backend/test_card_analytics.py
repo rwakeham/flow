@@ -225,3 +225,34 @@ def test_csv_export_cells_cannot_become_formulas():
         assert spreadsheet_safe(bad) == "'" + bad
     for ok in ("STARBUCKS", "", "Shake Shack", 12.5, None, True):
         assert spreadsheet_safe(ok) == ok
+
+
+# ── The year-end summary ──────────────────────────────────────────────────────
+
+def test_year_summary_groups_a_calendar_year_by_category_with_tax_notes():
+    from types import SimpleNamespace
+    from datetime import date as D
+    rows = [
+        Row(id=1, card_account_id=1, card="A", date=D(2026, 3, 1), amount=-100.0, txn_type="purchase", txn_subtype="",
+            is_spend=True, canonical_merchant="Clinic", merchant_family="", cat_l1="Health & Personal", cat_l2="Medical", cat_l3="Medical"),
+        Row(id=2, card_account_id=1, card="A", date=D(2026, 3, 9), amount=20.0, txn_type="refund", txn_subtype="",
+            is_spend=True, canonical_merchant="Clinic", merchant_family="", cat_l1="Health & Personal", cat_l2="Medical", cat_l3="Medical"),
+        Row(id=3, card_account_id=1, card="A", date=D(2026, 12, 24), amount=-50.0, txn_type="purchase", txn_subtype="",
+            is_spend=True, canonical_merchant="Food Bank", merchant_family="", cat_l1="Giving", cat_l2="Charitable giving", cat_l3="Donation"),
+        Row(id=4, card_account_id=1, card="A", date=D(2025, 12, 31), amount=-999.0, txn_type="purchase", txn_subtype="",
+            is_spend=True, canonical_merchant="Last year", merchant_family="", cat_l1="Giving", cat_l2="Charitable giving", cat_l3="Donation"),
+        Row(id=5, card_account_id=1, card="A", date=D(2026, 5, 5), amount=-300.0, txn_type="payment", txn_subtype="",
+            is_spend=False, canonical_merchant="Payment", merchant_family="", cat_l1="Transfers / P2P", cat_l2="Card payment", cat_l3=""),
+    ]
+    cash = [SimpleNamespace(source="cash", group="spend", date=D(2026, 4, 2), amount=40.0, detail="Giving (cash)", sub="Parish"),
+            SimpleNamespace(source="cash", group="income", date=D(2026, 4, 2), amount=4000.0, detail="Employer", sub=""),
+            SimpleNamespace(source="card", group="spend", date=D(2026, 4, 2), amount=9.0, detail="Shopping", sub="x")]
+    out = A.year_summary(rows, cash, 2026)
+    assert [(r["source"], r["category"], r["subcategory"], r["tax_note"]) for r in out] == [
+        ("card", "Health & Personal", "Medical", "medical"), ("card", "Giving", "Charitable giving", "giving"),
+        ("cash", "Giving", "Parish", "giving")]
+    med = out[0]
+    assert (med["net"], med["gross"], med["refunds"], med["count"]) == (80.0, 100.0, 20.0, 1)
+    assert med["months"][2] == 80.0 and sum(med["months"]) == 80.0
+    assert out[2]["net"] == 40.0 and out[2]["months"][3] == 40.0
+    assert A.tax_note("Financial / Investment", "Insurance") == "insurance" and A.tax_note("Shopping", "Clothing") == ""

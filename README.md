@@ -45,6 +45,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 - Manual transaction entry with description autocomplete from prior transactions
 - Import bank statements (CSV, TSV or XLSX from any bank) with an **import format** you set up once per layout (see [Import formats](#import-formats))
 - Running balance column (Quicken-style: balance updates on every row)
+- **↓ CSV** exports the open account's ledger with the running balance; the Dashboard's Manage Accounts exports the balance sheet by month (as the charts draw it, with the net worth totals) or every balance entered
 - Reconciliation: match bank-imported rows to manual ledger entries
 - Bulk reconcile: select multiple bank rows and add or delete in one action
 - Duplicate a manual transaction to quickly enter similar entries
@@ -71,6 +72,7 @@ Change the password under **Settings → Account** and the AI settings under **S
 - **+ Add recurring** (Subscriptions tab, a merchant's page, or **Track as recurring…** on any charge) for subscriptions Flow can't separate on its own, such as Kindle Unlimited billed as "Amazon": charges from that merchant within an amount range become their own series. Habitual merchants (groceries, fuel, Amazon shopping) are hidden unless you ask for them
 - A series with no charge for about 1.6 billing periods is flagged overdue (still counted); after about two missed charges, or when you mark it **Ended**, it moves to an Ended list and stops counting toward recurring totals. A new charge brings it back
 - Analytics: overview with coverage and common period, categories (click one for its subcategories, top merchants, monthly trend and largest purchases, plus trips and travel brands for Travel and dining vs groceries for Food), monthly trends, merchants and concentration, review list, CSV export
+- **Year-end summary** (Cards → Settings → Export): a CSV for a calendar year with spending by category and subcategory, a column per month, every card, plus what was paid from the cash accounts by payee role; giving, taxes, medical, insurance and tuition are marked for tax time
 - AI insights: a short findings report written from aggregate totals only
 
 ![Cards: categorized transactions with merchant names cleaned up](docs/screenshots/cards-transactions.png)

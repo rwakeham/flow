@@ -29,6 +29,8 @@ import card_amount_rules
 import card_recurring
 import card_rules
 import card_taxonomy
+import cash_flow
+import exports
 from auth import require_auth
 from backup_service import ensure_daily_backup
 from database import SessionLocal, get_db
@@ -1488,18 +1490,7 @@ EXPORT_COLUMNS = ["txn_id", "card", "txn_date", "post_date", "raw_description", 
                   "issuer_category", "notes"]
 
 
-_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
-
-
-def spreadsheet_safe(value):
-    """
-    A text cell a spreadsheet won't run: one starting with = + - @ (or a tab or carriage return)
-    is a formula when the CSV is opened in Excel, so it gets a leading apostrophe. Statement text
-    (merchant names, notes) can come from anyone. Numbers are written as they are.
-    """
-    if isinstance(value, str) and value.startswith(_FORMULA_START):
-        return "'" + value
-    return value
+spreadsheet_safe = exports.spreadsheet_safe       # shared with the other exports; kept importable from here
 
 
 @router.get("/export.csv")
@@ -1520,3 +1511,20 @@ def export_csv(accounts: str | None = None, date_from: DateType | None = Query(N
                     s(t.issuer_category or ""), s(t.notes or "")])
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": 'attachment; filename="card_transactions.csv"'})
+
+
+@router.get("/export-year.csv")
+def export_year_csv(year: int = Query(..., ge=2000, le=2100), db: Session = Depends(get_db)):
+    """The year-end summary: card spending by category and subcategory for a calendar year (every
+    card, archived ones included), net / gross / refunds / purchases and a column per month, with
+    giving, taxes, medical, insurance and tuition marked; plus spending paid from the cash accounts by
+    payee role (card payments and transfers left out, as in Cash Flow Analysis)."""
+    from routers import cashflow
+    start, end = DateType(year, 1, 1), DateType(year, 12, 31)
+    ids = ",".join(str(a.id) for a in db.query(CardAccount.id).all())
+    loaded = _load(db, ids, start, end) if ids else None
+    rows, _spend, payments, _card_rows = cashflow._inputs(db, start, end)
+    entries, _left = cash_flow.tag(rows, [], payments, cashflow._roles(db), start, end)
+    summary = card_analytics.year_summary(loaded.rows if loaded else [], entries, year)
+    return exports.csv_response(exports.YEAR_SUMMARY_COLUMNS, exports.year_summary_rows(summary), f"card-summary-{year}")
+

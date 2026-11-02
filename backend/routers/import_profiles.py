@@ -11,7 +11,6 @@ imported one is marked ``needs_preview`` until it has read a real file.
 
 from __future__ import annotations
 
-from urllib.parse import quote
 
 import json
 
@@ -21,6 +20,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import exports
+import change_log
 from auth import require_auth
 from database import get_db
 import import_infer
@@ -129,6 +130,7 @@ def create_profile(body: ProfileBody, db: Session = Depends(get_db)):
             raise HTTPException(status_code=422, detail=f"A {spec.kind} format can't be used by a {l.kind} account.")
         _account(db, l.kind, l.account_id)
         resolve.link(db, row.id, l.kind, l.account_id)
+    change_log.record(db, "format", "add", f"Added {spec.kind} import format {change_log.clip(row.name)}", {"id": row.id, "kind": spec.kind, "links": len(body.link)})
     db.commit()
     return _json(db, row)
 
@@ -148,6 +150,8 @@ def update_profile(profile_id: int, body: ProfileBody, db: Session = Depends(get
             raise HTTPException(status_code=422, detail=f"A {row.kind} format can't be used by a {l.kind} account.")
         _account(db, l.kind, l.account_id)
         resolve.link(db, row.id, l.kind, l.account_id)
+    change_log.record(db, "format", "edit", f"Edited import format {change_log.clip(row.name)}" + (f" (version {row.version})" if new_json != row.spec_json or row.version > 1 else ""),
+                      {"id": row.id, "version": row.version, "links": len(body.link)})
     db.commit()
     return _json(db, row)
 
@@ -157,6 +161,7 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)):
     row = _profile(db, profile_id)
     db.query(ImportProfileLink).filter_by(profile_id=row.id).delete(synchronize_session=False)
     db.execute(text("UPDATE card_imports SET profile_id = NULL WHERE profile_id = :p"), {"p": row.id})
+    change_log.record(db, "format", "delete", f"Deleted import format {change_log.clip(row.name)}", {"id": row.id, "kind": row.kind})
     db.delete(row)
     db.commit()
 
@@ -168,6 +173,7 @@ def add_link(profile_id: int, body: LinkBody, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail=f"A {row.kind} format can't be used by a {body.kind} account.")
     _account(db, body.kind, body.account_id)
     resolve.link(db, row.id, body.kind, body.account_id)
+    change_log.record(db, "format", "link", f"Linked import format {change_log.clip(row.name)} to a {body.kind} account", {"id": row.id, "kind": body.kind, "account_id": body.account_id})
     db.commit()
     return _json(db, row)
 
@@ -177,6 +183,7 @@ def remove_link(profile_id: int, kind: str = Query(...), account_id: int = Query
     row = _profile(db, profile_id)
     db.query(ImportProfileLink).filter_by(profile_id=row.id, account_kind=kind, account_id=account_id).delete(
         synchronize_session=False)
+    change_log.record(db, "format", "unlink", f"Unlinked import format {change_log.clip(row.name)} from a {kind} account", {"id": row.id, "kind": kind, "account_id": account_id})
     db.commit()
     return _json(db, row)
 
@@ -191,17 +198,7 @@ def export_profile(profile_id: int, db: Session = Depends(get_db)):
                     headers={"Content-Disposition": download_disposition(row.name, ".flow-format.json")})
 
 
-def download_disposition(name: str, suffix: str) -> str:
-    """
-    Content-Disposition for a download named after something the user typed. HTTP headers carry
-    Latin-1 only, so the plain filename keeps ASCII letters, digits, space, - and _ (a name in
-    Cyrillic or Chinese used to fail with a 500); filename* (RFC 6266) carries the real name in
-    UTF-8 for browsers that read it.
-    """
-    ascii_name = "".join(ch if (ch.isascii() and ch.isalnum()) or ch in " -_" else "_" for ch in name).strip(" _")
-    real = "".join(ch for ch in name if ch.isprintable() and ch not in '/\\"').strip() or "format"
-    return (f'attachment; filename="{ascii_name or "format"}{suffix}"; '
-            f"filename*=UTF-8''{quote(real + suffix, safe='')}")
+download_disposition = exports.download_disposition      # shared with the CSV exports; kept importable from here
 
 
 @router.post("/import", status_code=201)
@@ -223,6 +220,7 @@ async def import_profile_file(file: UploadFile = File(...), db: Session = Depend
                         spec_json=json.dumps(spec.to_json(), sort_keys=True), fingerprint=spec.fingerprint,
                         version=1, needs_preview=True)
     db.add(row)
+    change_log.record(db, "format", "import", f"Imported {spec.kind} format {change_log.clip(name)} from a file", {"kind": spec.kind, "name": name})
     db.commit()
     return _json(db, row)
 

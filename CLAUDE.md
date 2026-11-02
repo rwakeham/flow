@@ -21,6 +21,8 @@ backend/                — FastAPI application
   database.py             DB engine and session factory (reads DATABASE_URL)
   cash_flow.py            Cash flow Sankey (pure): payee keys and roles, card-payment/transfer matching, the diagram
   asset_versions.py       Content-hash ?v= on index.html's /static references (cache-busting)
+  exports.py              CSV exports (pure): formula-safe cells, csv_response, the register / balance-sheet
+                          row builders; spreadsheet_safe and download_disposition live here
   VERSION                 Flow's version, MAJOR.MINOR.PATCH: the only place it is written (see Releases)
   version.py              Reads VERSION (APP_VERSION; "unknown" if missing or malformed)
   update_check.py         Daily check of GitHub's latest release against APP_VERSION: strict reply parsing and the
@@ -29,6 +31,8 @@ backend/                — FastAPI application
                           encrypted API key: flow_secrets) in the database; .env wins while a variable is set
   reset_password.py       Host-side password reset: docker compose exec app python reset_password.py
   balance_sheet.py        Balance entry (pure): paste reading, scrubbed AI outline, preview checks, carry-forward
+  attention.py            The Dashboard's "Needs attention" panel (pure): the ordered items and where each opens
+  change_log.py           The change log: record() a row with the route's commit, who did it (X-Flow-Via), the cap
   reconciler.py           Bank-to-ledger match suggestions
   import_dedup.py         De-duplication of re-imported bank statements
   import_batch.py         Bulk import: suggests each file's account (pure; no DB)
@@ -40,7 +44,8 @@ backend/                — FastAPI application
   testdata/               Synthetic sample files and their formats (sample_files.py), named by layout shape,
                           with the rows each reads to (expected_rows/)
   recurring.py            Recurring-transaction projection
-  backup_service.py       Backup file generation (all register and card tables); backup ids and zip size limits
+  backup_service.py       Backup file generation (all register and card tables); backup ids and zip size limits;
+                          the daily backup loop, retention (due / prune) and the encrypted copy (encrypt_backup)
   security_headers.py     ASGI middleware: CSP, nosniff, Referrer-Policy, X-Frame-Options on every response;
                           SameOrigin refuses state-changing requests from another origin (403)
   body_limit.py           ASGI middleware: request body size cap (413), per-path limits
@@ -54,7 +59,7 @@ backend/                — FastAPI application
   card_ai.py              Anthropic API: merchant categorization and aggregate-only insights
   card_amount_rules.py    Category by amount range, per merchant or per category
   card_recurring.py       Subscription / recurring-charge detection
-  card_analytics.py       Spend analytics tables and the insights payload
+  card_analytics.py       Spend analytics tables, the insights payload and the year-end summary (year_summary)
   ask.py                  Assistant chat (code name "ask"): history checks, topic gate, streamed tool loop, number check
   ask_data.py             Assistant's index, trim list and lookup tools (summaries; aliases; cleaned names)
   ask_proposals.py        Assistant's propose_* tools: checked change proposals the user applies
@@ -67,6 +72,8 @@ backend/                — FastAPI application
     cashflow.py           /api/cashflow — the Sankey for a period; payee roles (Sort payees)
     balances.py           /api/balances — paste read (+ AI fallback), preview, apply, single edits, alert settings
     upload.py             /api/import/detect and /api/import/batch/plan (which saved formats read a file)
+    attention.py          /api/attention — the Needs attention panel's items, gathered from the other routers
+    changes.py            /api/changes — the change log, newest first, a page at a time
     import_profiles.py    /api/import-profiles — formats, account links, draft, preview, export/import
     register.py           /api/register — cash flow register
     cards.py              /api/cards — card accounts, imports, transactions, analytics, AI
@@ -83,7 +90,8 @@ frontend/               — Static frontend, served directly by the backend
                           (the Cards section UI), balances.js / balances.css (Update balances and the
                           account editor), cashflow.js / cashflow.css (Dashboard → Cash Flow Analysis), importprofiles.js / .css (import formats in the
                           import dialog), accounts.css (the shared account-dialog frame), ask.js / ask.css
-                          (the Assistant panel) and ai.js / ai.css (top bar → AI: models and privacy log), loaded
+                          (the Assistant panel), ai.js / ai.css (Settings → AI: models and privacy log) and settings.js /
+                          settings.css (the ⚙ Settings dialog: AI, Backups, Updates, Account sections), loaded
                           after index.html's inline script; vendor/ holds Chart.js (MIT)
 docker-compose.yml      — db (Postgres) + app (FastAPI) services
 .github/workflows/
@@ -150,7 +158,7 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   on the first start and resets it while it stays there), backed by a signed session cookie
   (`SECRET_KEY`). There are no user accounts. The cookie carries `{"v": 2, "p": <HMAC of the session
   generation and the password hash under SECRET_KEY>, "s": <session id>}`, so changing the password
-  (Sign out ▾ → Change password, `POST /api/auth/change-password`, current password required;
+  (Settings → Account → Change password, `POST /api/auth/change-password`, current password required;
   `reset_password.py` from the host; or `FLOW_PASSWORD`) or the key signs every browser out; the tag is
   keyed so the readable cookie can't be used to guess the password. "Sign out everywhere" (top bar
   Sign out ▾, `POST /api/auth/logout-everywhere`) bumps the generation (`flow_settings`
@@ -206,6 +214,24 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   `INSERT`s by column name, so `_check_card_columns` allows only the table's own columns (from the
   ORM metadata) before anything is deleted, and the statement quotes them. The card CSV export
   passes text cells through `routers/cards.spreadsheet_safe` (a leading `'` before = + - @).
+  **The daily backup** (`backup_service.loop`, started by the lifespan beside the update check; a few
+  minutes after startup, then every 15 minutes): `run_scheduled` takes one `scheduled` backup a day once
+  it is `due` (at or after `settings_store.backup_hour()` UTC, judged by the newest scheduled backup's
+  `created_at`, never the file's mtime; a restart after the hour catches up) while
+  `backup_daily_flag()` is on, then `prune_backups(backup_keep())` removes the automatic backups
+  (`PRUNABLE`: scheduled, auto-pre-import) beyond the newest N (0 keeps all); manual, uploaded and
+  pre-restore backups are never removed. `due` / `prune` / `last_scheduled` are pure. One `_lock` serializes
+  every write and prune. The settings (`backup_daily`, `backup_keep`, `backup_hour`: `SETTING_ENV` →
+  `FLOW_BACKUP_*`) are `GET`/`PUT /api/backups/settings` (409 while `.env` sets one) and shown under
+  Settings → Backups; a restore keeps them, with the session keys and `update_check`
+  (`KEEP_ON_RESTORE`). **Encrypted copies** are download/upload only, the files on the server stay plain:
+  `POST /api/backups/{id}/download` with `{passphrase}` (8..200 chars, a POST so it is never in a URL)
+  returns `encrypt_backup`'s container as `<id>.flowbackup` (`MAGIC` FLOWBK1, 16-byte salt, scrypt
+  n_log2/r/p, 12-byte nonce, AES-GCM over the zip with the header as AAD; key = `hashlib.scrypt`, N=2^17,
+  r=8, p=1, `maxmem` 2×128·r·N since OpenSSL refuses exactly 128·r·N); the upload route takes an optional
+  `passphrase` form field and `decrypt_backup`s a file that starts with the magic (422 on
+  `WrongPassphrase`; header parameters outside n_log2 10..18, r 1..16, p 1..4 are refused before scrypt
+  runs, since an uploaded header is someone else's data). The passphrase is never stored.
 - **Balance sheet** (`accounts`, `balances`, `balance_sheet.py`, `routers/balances.py`): values are typed,
   pasted, or read from a balance file (Update balances → File: `POST /api/balances/import/read` reads a holdings or
   accounts export with any saved `balance` import format, `resolve.choose` across all of them since one file lists
@@ -259,6 +285,46 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   rows open the Cards edit dialog in place (`cfwEditCard`, `CD.onEdited` reloads the diagram), cash rows open
   Sort payees. Assistant: the `cash_flow` lookup and `propose_payee_role` (payee by its lookup label; withheld and
   person-to-person labels are refused). Payee names reach the Assistant only through `AskData.safe`.
+- **Change log** (`change_log.py`, `models.ChangeLog` / table `change_log`, `routers/changes.py`, Settings → Change log in
+  `static/changes.js`): every route that changes data calls `change_log.record(db, kind, action, summary, detail)`
+  before its `db.commit()`, so the row is saved with the change and never without it (where a settings helper
+  commits itself, `record` goes right before the call). Summaries are built in code from `clip`ped names and
+  counts, never multi-line user text (the page still escapes them). `via` is who acted: `ui` (default),
+  `assistant` (the browser's `askApply` sends `X-Flow-Via: assistant`; `read_via` is an app-wide dependency on
+  `FastAPI(dependencies=...)` that MUST stay `async`, because a sync dependency runs in a threadpool with a copied
+  context and its contextvar never reaches the route), `schedule` (the backup loop, `card_ai.run_categorization`)
+  and `startup` (the rules refresh); background and startup writers pass `via` explicitly. Not logged: review
+  ticks, insights, Assistant questions, sign-in, the auto-pre-import backup. The table is NOT in
+  `backup_service.CARD_TABLES`: a restore keeps the log and records itself, and an uploaded backup can't inject
+  rows. `change_log.prune` (newest `MAX_ROWS`, 20,000) runs from the backup loop's tick. Adding a new
+  state-changing route: record there too (see Common tasks).
+- **Needs attention** (`attention.py`, `routers/attention.py`, the `#attention` panel in `index.html` under the metric
+  cards): `GET /api/attention` (`X-Flow-Today`) gathers every signal from what the other routers already compute,
+  so each count matches the tab its row opens, and `attention.build` (pure) orders them: AI paused
+  (`card_ai.key_problem`), bank rows to reconcile and auto-matches to confirm per cash account
+  (`routers/register.account_signals`, one grouped query shared with `/api/register/accounts`, the reconcile
+  view's rules), balance accounts behind (`routers/data.list_accounts`, not ignored/archived), cash accounts
+  behind, payees needing a role (`routers/cashflow.list_payees`, this year), card charges to review
+  (`routers/cards.review_result` over one `_load` of this year), subscriptions overdue / price change / on two
+  cards (`loaded.recurring_items`: `status`, the "price change" / "up " strings in `change_detected`,
+  "duplicate" in `notes`), formats `needs_preview`, backups (`backup_service.list_backups` newest `created_at`
+  over `BACKUP_OLD_DAYS`, `backup_daily_flag`), the update (`update_check.status`). Each item's `nav` is a shape
+  `askNavigate` (`static/ask.js`) opens: a section (`{section, tab, payees, accounts}`, `{section:'cashflow',
+  account, reconcile}`, `{section:'cards', tab}`) or a dialog (`{action:'settings', section}`, `balances`,
+  `import`, `formats`); `test_attention.known_nav` lists them. The panel is fetched after `loadAll` draws the
+  page and when the Dashboard is shown again; collapsed state in `localStorage`. Text is escaped by the page.
+- **CSV exports** (`exports.py`): every export goes through `exports.csv_response(header, rows, name)`, which
+  writes floats with two decimals, ints as they are, booleans as yes/blank, None blank and text through
+  `spreadsheet_safe` (a leading `'` before = + - @, so an amount must be a number, never a string: a "-12.50"
+  string would be quoted); the filename comes from `download_disposition` (any text). The card transactions
+  (`routers/cards` `/export.csv`), the register (`/api/register/{id}/export.csv`: the rows
+  `_compute_running_balance` returns, so the balance column is the page's, filters not applied), the balance
+  sheet (`/api/data/export.csv?layout=long|wide`: `wide` is `balance_matrix` with carried values filled and
+  named in a `carried` column, totals as `summarize`, ignored accounts shown but left out of them; cash
+  accounts are not in it) and the year-end summary (`/api/cards/export-year.csv?year=`:
+  `card_analytics.year_summary` over every card's `SPEND_TYPES` rows and `cash_flow.tag`'s cash `spend`
+  entries, `tax_note` by original built-in names through `Row.b2`: giving, taxes, medical, insurance,
+  tuition; Cards → Settings → Export has the year picker, `cdYears` from the cards' coverage).
 - **Clear filters**: every filter bar has a "✕ Clear filters" button (`.clear-filters`) shown only while a
   filter differs from its default (Cards bar, Cards transactions, Settings merchants, the register, Cash Flow,
   Sort payees). Add one to any new filter bar.
@@ -344,7 +410,7 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   are put back only for display, by `card_analytics.unalias` (handles "Cards C and D" too).
   Every call is logged in `ai_request_log`: the data sent (`payload_json`), the whole request body
   (`request_json`: system prompt, tools, messages, settings) and the whole response (`response_json`),
-  shown in the AI dialog (top bar → AI, `static/ai.js`, `/api/ai/log`), beside the model each feature uses
+  shown in the AI section of Settings (top bar → ⚙ Settings → AI, `static/ai.js`, `/api/ai/log`), beside the model each feature uses
   (`card_ai.FEATURES`: add a new feature there). Any new AI call must record both (`card_ai.record_request` /
   `record_response`, as `card_ai._call` and `routers/ask.make_logger` do) and be covered by a test
   asserting nothing identifying is in it. Merchant
@@ -482,7 +548,7 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   again. One in-memory copy (`settings_store.load` at startup and after a backup restore), one worker.
   The AI dialog (`static/ai.js`, `routers/ai.py`) has the key (save, test, remove), the switch, the three
   models (datalist of known names, validated like `setup.sh` did) and the redact words.
-- **Update check** (`update_check.py`, `routers/updates.py`, the Sign out ▾ menu in `index.html`): a background
+- **Update check** (`update_check.py`, `routers/updates.py`, Settings → Updates in `index.html` / `static/settings.js`): a background
   task started by the lifespan (`update_check.loop`; two minutes after startup, so the deploy's health check
   comes first, then daily) does one GET to GitHub's latest-release endpoint for `update_check.REPO`, server-side
   (the browser never calls out; the CSP stays closed) and with nothing of the user's. The reply is external data:
@@ -493,8 +559,8 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   in memory between checks. `GET /api/version` returns `{version, update: status()}`; `POST /check` runs one now
   whatever the switch says (a failure is shown only there: the daily check logs and tries tomorrow); `POST
   /dismiss` hides a release until a newer one; `PUT /settings` is the daily switch (`flow_settings`
-  `update_check`, `SETTING_ENV` → `FLOW_UPDATE_CHECK`, refused with 409 while `.env` sets it). The menu shows a
-  dot on Sign out ▾ (fetched once after sign-in) and the version line with the release link, hide, and the switch.
+  `update_check`, `SETTING_ENV` → `FLOW_UPDATE_CHECK`, refused with 409 while `.env` sets it). The Settings button shows a
+  dot (fetched once after sign-in) and Settings → Updates the version line with the release link, hide, and the switch.
   Flow never installs an update: updating stays `git pull && ./deploy.sh`. README's "What leaves your machine"
   describes the call; keep it in step.
 
@@ -515,6 +581,9 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
 ## Common tasks
 
 ### Add a new backend endpoint
+
+A route that changes data also records the change: `change_log.record(db, "<kind>", "<action>", "<summary built from
+clipped names and counts>", {<small detail>})` just before its `db.commit()`, so the row is saved with the change.
 
 1. Add the route to the relevant router in `backend/routers/`, or create a new router and
    include it in `main.py`.
@@ -546,21 +615,26 @@ the proxy settings). For host state:
 | `COOKIE_SECURE` | `false` | When truthy (`1`/`true`/`yes`), marks the session cookie `Secure`; enable when serving over HTTPS behind a reverse proxy |
 | `FLOW_TRUSTED_PROXIES` | *(empty)* | Comma-separated IPs or CIDR ranges of reverse proxies whose `X-Forwarded-For` is believed for the login throttle (`auth.client_ip`); a malformed entry stops startup |
 | `FLOW_RECURRING_SUBSTREAMS` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to disable the recurring-transaction substream detection algorithm |
-| `ANTHROPIC_API_KEY` | *(unset: the key stored in Flow, or AI off)* | The Anthropic API key; normally entered under AI in the top bar and stored encrypted (`flow_secrets`). Set here it is copied in and wins while it stays |
+| `ANTHROPIC_API_KEY` | *(unset: the key stored in Flow, or AI off)* | The Anthropic API key; normally entered under Settings → AI and stored encrypted (`flow_secrets`). Set here it is copied in and wins while it stays |
 | `FLOW_AI_MODEL` | `claude-sonnet-5-5` | Claude model for every AI feature; normally set in the AI dialog (`flow_settings` `ai_model`); the default lives only in `card_ai.DEFAULT_MODEL` |
 | `FLOW_AI_MODEL_CATEGORIZE` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for merchant categorization only (`card_ai.model_name(TASK_CATEGORIZE)`; `ai_model_categorize`) |
 | `FLOW_AI_MODEL_ASK` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for the Assistant's topic gate and answer rounds (`TASK_ASK`; `ai_model_ask`) |
 | `FLOW_AI_ENABLED` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn AI calls off even with a key set (the AI dialog's switch, `ai_enabled`) |
 | `FLOW_AI_REDACT` | *(empty)* | Comma-separated extra words stripped from merchant names before any AI call (the AI dialog's field, `ai_redact`) |
-| `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Sign out ▾ has the same switch, `update_check`) |
+| `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Settings → Updates has the same switch, `update_check`) |
+| `FLOW_BACKUP_DAILY` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily backup off (Settings → Backups, `backup_daily`) |
+| `FLOW_BACKUP_KEEP` | `30` | Automatic backups kept, newest first; `0` keeps all (`backup_keep`, clamped 0..3650) |
+| `FLOW_BACKUP_HOUR` | `3` | UTC hour the daily backup is taken at or after (`backup_hour`, 0..23) |
 
 `.env.example` lists the four user-facing variables (`POSTGRES_PASSWORD`, `FLOW_PASSWORD`,
 `SECRET_KEY` blank, so a copied file can't deploy as is; `APP_PORT`), plus the optional ones commented out.
 `setup.sh` writes the four (the password is required before the first start; once a database volume
 exists it is optional, offered as a reset, since Flow keeps the password itself), then offers the
 Anthropic API key (read hidden; `off` removes the line). The models, switch and redact words are the AI
-dialog's; `setup.sh` no longer asks for them. On a re-run with a database volume, `setup.sh` offers to
-remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*` and `FLOW_UPDATE_CHECK` still in `.env` that this run didn't
+dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
+`${VAR:-}` with a blank default: a non-blank default would reach the app as a set variable and lock the
+setting in the dialog (409). On a re-run with a database volume, `setup.sh` offers to
+remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*`, `FLOW_UPDATE_CHECK` and `FLOW_BACKUP_*` still in `.env` that this run didn't
 just set (`_env_unset`), since Flow has copied them in. `deploy.sh` requires `POSTGRES_PASSWORD` and
 `SECRET_KEY`, requires `FLOW_PASSWORD` only before the first start (no `pgdata` volume by Compose's
 labels), and notes the values Flow keeps that are still set. `DATABASE_URL`, `COOKIE_SECURE`,
@@ -618,7 +692,7 @@ awkward passwords through `_env_set` / `_env_get` and, where `docker compose` is
 
 - **Version**: `backend/VERSION`, one line, `MAJOR.MINOR.PATCH`, and the only place it is written
   (`version.py` reads it; `test_version.py` checks it). The image carries it (`COPY . .`). It is
-  shown under Sign out ▾ (`GET /api/version`, signed-in only: `/api/health` stays bare so an
+  shown under Settings → Updates (`GET /api/version`, signed-in only: `/api/health` stays bare so an
   unauthenticated caller can't tell which fixes a server has) and printed by `deploy.sh`.
 - **Every merge to `main` is a release; the bump is automatic.** Don't edit `backend/VERSION` in a
   change. The release picks the bump from the commits since the last release:

@@ -1238,7 +1238,7 @@ async function cdRenderInsights(panel, reportId) {
       <button class="btn-primary" id="cd-ins-gen" onclick="cdGenerateInsights()" ${status.enabled && !status.problem ? '' : 'disabled'}>Generate insights ▸</button>
       <select id="cd-ins-past" onchange="cdShowInsight(this.value)"><option value="">Past reports…</option>
         ${past.map(p => `<option value="${p.id}">${new Date(p.created_at).toLocaleString()} · ${h((p.headline || '').slice(0, 60))}</option>`).join('')}</select>
-      <span class="cd-note"${status.problem ? ' style="color:var(--red)"' : ''}>${status.problem ? `⚠ ${h(status.problem.message)} Update the key under AI in the top bar.` : status.enabled ? `Uses ${h(status.model)} with the cards and period selected above. Only aggregate tables are sent.` : h(status.reason)}</span>
+      <span class="cd-note"${status.problem ? ' style="color:var(--red)"' : ''}>${status.problem ? `⚠ ${h(status.problem.message)} Update the key under Settings → AI.` : status.enabled ? `Uses ${h(status.model)} with the cards and period selected above. Only aggregate tables are sent.` : h(status.reason)}</span>
     </div>
     <div id="cd-ins-body">${past.length ? '' : '<div class="empty"><h3>No reports yet</h3><p>Generate a report to get findings and recommended actions from your spending totals.</p></div>'}</div>`;
   const pick = reportId || (past[0] && past[0].id);
@@ -1308,10 +1308,10 @@ async function cdRenderSettings(panel) {
       ${status.enabled ? `<button class="btn-sm" onclick="cdRunAi()" ${status.running ? 'disabled' : ''}>${status.running ? 'Running…' : 'Re-run AI'}</button>` : ''}</div>
       <div class="cd-card-b cd-note">
         ${status.enabled ? `On, using <strong>${h(status.categorize_model || status.model)}</strong>. ${status.pending_merchants} merchant${status.pending_merchants === 1 ? '' : 's'} waiting.` : h(status.reason)}
-        ${status.problem ? `<br><span style="color:var(--red)">⚠ Paused since ${new Date(status.problem.at).toLocaleString()}: ${h(status.problem.message)} Automatic categorization stops until the key is updated under AI in the top bar; "Re-run AI" tries the current key once.</span>` : ''}
+        ${status.problem ? `<br><span style="color:var(--red)">⚠ Paused since ${new Date(status.problem.at).toLocaleString()}: ${h(status.problem.message)} Automatic categorization stops until the key is updated under Settings → AI; "Re-run AI" tries the current key once.</span>` : ''}
         ${last ? `<br>Last run ${new Date(last.at).toLocaleString()}: sent ${last.sent} merchant names, categorized ${last.classified}, updated ${last.transactions_updated} transactions${last.reused ? `, and reused stored categories for ${last.reused} more without a call` : ''}.${last.error ? ' <span style="color:var(--red)">' + h(last.error) + '</span>' : ''}` : ''}
         <br>Only sanitized merchant names, the issuer's category label and the payment processor are sent: never amounts, dates, card or account details, names, or full descriptions. Each merchant is sent once; answers are cached, and other spellings of a cached merchant (CIRCLE_K, Circle K, a truncated name) reuse the stored answer.
-        <br><button class="btn-sm" style="margin-top:6px" onclick="aiOpen()">AI models and privacy log…</button> (also <strong>AI</strong> in the top bar)
+        <br><button class="btn-sm" style="margin-top:6px" onclick="aiOpen()">AI models and privacy log…</button> (also <strong>Settings → AI</strong> in the top bar)
       </div></div>
 
     <div class="cd-card"><div class="cd-card-h"><span class="grow">Your categories</span>
@@ -1359,9 +1359,24 @@ async function cdRenderSettings(panel) {
       <tbody id="cd-merch-body"></tbody></table></div></div>
 
     <div class="cd-card"><div class="cd-card-h">Export</div><div class="cd-card-b cd-note">
-      <a href="/api/cards/export.csv?${cdQS({}, {noCommon: true})}">Download normalized transactions (CSV)</a> for the cards and period selected above, in the card-spend-analyzer layout (spend positive).</div></div>`;
+      <div><a href="/api/cards/export.csv?${cdQS({}, {noCommon: true})}">Download normalized transactions (CSV)</a> for the cards and period selected above, in the card-spend-analyzer layout (spend positive).</div>
+      <div style="margin-top:8px">Year-end summary for <select id="cd-year" onchange="cdYearLink()" style="width:auto;padding:3px 6px">${cdYears().map(y => `<option value="${y}">${y}</option>`).join('')}</select>:
+        <a id="cd-year-link" href="/api/cards/export-year.csv?year=${cdYears()[0]}">Download (CSV)</a>. Spending by category and subcategory with a column per month, every card, plus what was paid from the cash accounts by payee role; giving, taxes, medical, insurance and tuition are marked for tax time.</div></div></div>`;
   cdFilterMerchants();
   cdRnL1();
+}
+// The years the cards cover (newest first), for the year-end summary; this year when nothing is known.
+function cdYears() {
+  const years = new Set([new Date().getFullYear()]);
+  for (const a of CD.accounts || []) for (const d of [a.first_date, a.last_date]) if (d) years.add(parseInt(d.slice(0, 4), 10));
+  const [lo, hi] = [Math.min(...years), Math.max(...years)];
+  const out = [];
+  for (let y = hi; y >= lo; y--) out.push(y);
+  return out;
+}
+function cdYearLink() {
+  const y = parseInt(document.getElementById('cd-year').value, 10);
+  document.getElementById('cd-year-link').href = '/api/cards/export-year.csv?year=' + (Number.isFinite(y) ? y : new Date().getFullYear());
 }
 function cdRnL1() {
   const l1 = document.getElementById('cd-rn-l1').value;
@@ -1489,7 +1504,7 @@ async function cdPollAi(start) {
     banner.innerHTML = `<span title="${h(s.reason)}">AI categorization off</span>`;
   } else if (s.problem && !s.running) {
     banner.className = 'cd-banner warn';
-    banner.innerHTML = `⚠ AI paused: ${h(s.problem.message)} Update the key under AI in the top bar.
+    banner.innerHTML = `⚠ AI paused: ${h(s.problem.message)} Update the key under Settings → AI.
       <button class="btn-sm" onclick="cdRunAi()" title="Try the configured key once">Try again</button>`;
   } else if (s.running) {
     banner.innerHTML = '✦ Categorizing merchants with AI…';

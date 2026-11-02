@@ -385,3 +385,23 @@ class BalanceMarker(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_balance_markers_account", "account_id"),)
+
+
+class ChangeLog(Base):
+    """
+    The change log (change_log.record; Settings → Change log): what changed, when, and whether the
+    user, the Assistant, a schedule or startup did it. Kept OUT of backups (backup_service.CARD_TABLES
+    doesn't list it): a restore keeps this install's log and records itself, and a backup from elsewhere
+    can't bring rows in. Capped at change_log.MAX_ROWS newest rows (pruned by the backup loop).
+    """
+    __tablename__ = "change_log"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    kind = Column(String(16), nullable=False)        # register | card | balance | account | payee | format | backup | ai | auth | rules
+    action = Column(String(16), nullable=False)      # import | add | edit | delete | restore ... (change_log.record)
+    summary = Column(String, nullable=False)         # one line, built in code from clipped names and counts
+    detail_json = Column(Text, nullable=True)        # small: ids, counts, before / after names
+    via = Column(String(12), nullable=False, default="ui", server_default="ui")   # change_log.VIA
+
+    __table_args__ = (Index("idx_change_log_created", "created_at"),)

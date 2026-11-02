@@ -167,3 +167,118 @@ def test_a_hostile_upload_cannot_inject_markup_borrow_an_id_or_break_imports(bac
 def test_backup_info_that_isnt_json_is_refused():
     with pytest.raises(ValueError):
         bs.validate_zip_bytes(make_zip(backup_files(**{"backup_info.json": b"{nope"})))
+
+
+# ── The daily backup, retention and encrypted copies ──────────────────────────
+
+from datetime import datetime, timezone  # noqa: E402
+
+import settings_store as st  # noqa: E402
+
+UTC = timezone.utc
+
+
+def test_due_waits_for_the_hour_and_wants_one_scheduled_backup_a_day():
+    assert not bs.due(datetime(2026, 11, 2, 2, 59, tzinfo=UTC), None, 3)
+    assert bs.due(datetime(2026, 11, 2, 3, 0, tzinfo=UTC), None, 3)
+    assert not bs.due(datetime(2026, 11, 2, 15, 0, tzinfo=UTC), "2026-11-02T03:01:00+00:00", 3)
+    assert bs.due(datetime(2026, 11, 2, 3, 5, tzinfo=UTC), "2026-11-01T23:59:00+00:00", 3)
+    assert bs.due(datetime(2026, 11, 2, 0, 0, tzinfo=UTC), "2026-11-01T00:00:00+00:00", 0)
+    assert bs.due(datetime(2026, 11, 2, 9, 0, tzinfo=UTC), "not a date", 3)       # a bad record never blocks
+
+
+def test_last_scheduled_is_the_newest_scheduled_backups_created_at():
+    entries = [{"id": "a", "trigger": "manual", "created_at": "2026-11-09T00:00:00+00:00"},
+               {"id": "b", "trigger": "scheduled", "created_at": "2026-11-01T03:00:00+00:00"},
+               {"id": "c", "trigger": "scheduled", "created_at": "2026-11-02T03:00:00+00:00"}]
+    assert bs.last_scheduled(entries) == "2026-11-02T03:00:00+00:00"
+    assert bs.last_scheduled([entries[0]]) is None
+
+
+def _entry(i, trigger, day):
+    return {"id": f"b{i}", "trigger": trigger, "created_at": f"2026-10-{day:02d}T03:00:00+00:00"}
+
+
+def test_prune_keeps_the_newest_automatic_backups_and_never_the_users():
+    entries = [_entry(1, "scheduled", 5), _entry(2, "manual", 1), _entry(3, "auto-pre-import", 9),
+               _entry(4, "uploaded", 2), _entry(5, "scheduled", 7), _entry(6, "pre-restore", 3),
+               _entry(7, "auto-pre-import", 4)]
+    assert bs.prune(entries, 2) == ["b1", "b7"]           # the two newest (b3: 9th, b5: 7th) stay
+    assert bs.prune(entries, 0) == []
+    assert bs.prune(entries, 10) == []
+    for e in entries:
+        if e["trigger"] not in bs.PRUNABLE:
+            assert e["id"] not in bs.prune(entries, 1)
+
+
+def test_prune_backups_deletes_only_what_prune_says(backup_dir):
+    for i, (trigger, day) in enumerate([("scheduled", 1), ("scheduled", 2), ("manual", 1)], 1):
+        info = {"created_at": f"2026-10-{day:02d}T03:00:00+00:00", "trigger": trigger}
+        (backup_dir / f"flow_backup_202610{day:02d}_030000_0000000{i}.zip").write_bytes(
+            make_zip(backup_files(**{"backup_info.json": json.dumps(info).encode()})))
+    assert bs.prune_backups(1) == 1
+    left = sorted(p.name for p in backup_dir.glob("*.zip"))
+    assert left == ["flow_backup_20261001_030000_00000003.zip", "flow_backup_20261002_030000_00000002.zip"]
+
+
+def test_clean_info_keeps_the_scheduled_trigger():
+    assert bs.clean_info({"created_at": "2026-11-02T03:00:00+00:00", "trigger": "scheduled"})["trigger"] == "scheduled"
+
+
+@pytest.fixture
+def fast_scrypt(monkeypatch):
+    monkeypatch.setattr(bs, "SCRYPT_N_LOG2", 12)
+
+
+def test_encrypted_copy_round_trips(fast_scrypt):
+    blob = bs.encrypt_backup(b"PK\x03\x04 a zip", "correct horse battery")
+    assert bs.is_encrypted(blob) and not bs.is_encrypted(b"PK\x03\x04")
+    assert bs.decrypt_backup(blob, "correct horse battery") == b"PK\x03\x04 a zip"
+    assert blob[:bs.HEADER_LEN].count(b"correct") == 0
+
+
+def test_encrypted_copy_refuses_the_wrong_passphrase_and_any_change(fast_scrypt):
+    blob = bs.encrypt_backup(b"data" * 100, "correct horse battery")
+    with pytest.raises(bs.WrongPassphrase):
+        bs.decrypt_backup(blob, "wrong horse battery")
+    for pos in (10, len(blob) - 5):                     # in the header (the salt) and in the body
+        changed = bytearray(blob)
+        changed[pos] ^= 0x01
+        with pytest.raises(bs.WrongPassphrase):
+            bs.decrypt_backup(bytes(changed), "correct horse battery")
+
+
+def test_encrypted_copy_header_is_checked_before_scrypt_runs(fast_scrypt, monkeypatch):
+    with pytest.raises(ValueError):
+        bs.decrypt_backup(b"FLOWBK1" + b"x" * 10, "correct horse battery")      # too short
+    with pytest.raises(ValueError):
+        bs.decrypt_backup(b"not one" + b"x" * 100, "correct horse battery")
+    blob = bytearray(bs.encrypt_backup(b"data", "correct horse battery"))
+    blob[len(bs.MAGIC) + 16] = 25                      # n_log2 = 25: 4 GB of memory
+    monkeypatch.setattr(bs.hashlib, "scrypt", lambda *a, **k: pytest.fail("scrypt ran"))
+    with pytest.raises(ValueError):
+        bs.decrypt_backup(bytes(blob), "correct horse battery")
+
+
+def test_real_scrypt_parameters_work():
+    blob = bs.encrypt_backup(b"zip", "correct horse battery")
+    assert bs.decrypt_backup(blob, "correct horse battery") == b"zip"
+
+
+def test_backup_settings_defaults_and_clamps(monkeypatch):
+    for var in ("FLOW_BACKUP_DAILY", "FLOW_BACKUP_KEEP", "FLOW_BACKUP_HOUR"):
+        monkeypatch.delenv(var, raising=False)
+    st.testing_state({})
+    assert st.backup_daily_flag() and st.backup_keep() == 30 and st.backup_hour() == 3
+    st.testing_state({st.BACKUP_DAILY: "off", st.BACKUP_KEEP: "99999", st.BACKUP_HOUR: "-4"})
+    assert not st.backup_daily_flag() and st.backup_keep() == 3650 and st.backup_hour() == 0
+    st.testing_state({st.BACKUP_KEEP: "lots", st.BACKUP_HOUR: "noon"})
+    assert st.backup_keep() == 30 and st.backup_hour() == 3
+    monkeypatch.setenv("FLOW_BACKUP_HOUR", "22")
+    assert st.backup_hour() == 22 and st.setting_source(st.BACKUP_HOUR) == "env"
+    st.testing_state({})
+
+
+def test_keep_on_restore_holds_the_installs_schedule_and_change_log_stays_out_of_backups():
+    assert set(bs.SESSION_KEYS) <= set(bs.KEEP_ON_RESTORE)
+    assert {st.BACKUP_DAILY, st.BACKUP_KEEP, st.BACKUP_HOUR, st.UPDATE_CHECK} <= set(bs.KEEP_ON_RESTORE)

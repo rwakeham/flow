@@ -155,17 +155,32 @@ function askFormat(text) {
   return frag;
 }
 
+// Also used by the Dashboard's Needs attention rows. nav.action opens a dialog instead of a page:
+// {action:'settings', section} a Settings section; balances = Update balances; import; formats = the formats list.
+const ASK_ACTIONS = {
+  settings: nav => settingsOpen(nav.section),
+  balances: () => balOpen(),
+  import: () => openImport(),
+  formats: () => ipOpenList(),
+};
 function askNavigate(nav) {
   if (!nav) return;
+  if (nav.action) {
+    const fn = ASK_ACTIONS[nav.action];
+    if (fn) fn(nav);
+    return;
+  }
   if (nav.section === 'dashboard') {
     showSection('dashboard');
     const btn = nav.tab && [...document.querySelectorAll('.tab-btn')].find(b => (b.getAttribute('onclick') || '').includes(`'${nav.tab}'`));
     if (btn) btn.click();
     if (nav.payees && typeof cfwOpenPayees === 'function') setTimeout(() => cfwOpenPayees(nav.payees === true ? 'needs' : 'all', nav.payees === true ? '' : nav.payees), 300);
+    if (nav.accounts && !document.getElementById('acct-body').classList.contains('open')) toggleAcctPanel();
     return;
   }
   if (nav.section === 'cashflow') {
-    if (nav.account) openRegisterAccount(nav.account); else showSection('cashflow');
+    if (!nav.account) { showSection('cashflow'); return; }
+    openRegisterAccount(nav.account).then(() => { if (nav.reconcile && !cfReconciling) toggleReconcile(); });
     return;
   }
   if (nav.section === 'cards') {
@@ -232,8 +247,8 @@ function askProposalCard(m, p) {
 async function askApply(m, p, quiet = false) {
   p.error = '';
   try {
-    const res = await fetch(p.apply.url, {method: p.apply.method, headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(p.apply.body)});
+    const res = await fetch(p.apply.url, {method: p.apply.method, body: JSON.stringify(p.apply.body),
+      headers: {'Content-Type': 'application/json', 'X-Flow-Via': 'assistant'}});   // the change log says who did it
     if (!res.ok) {
       let detail = 'Could not apply (' + res.status + ').';
       try { const j = await res.json(); detail = typeof j.detail === 'string' ? j.detail : detail; } catch (e) { /* not JSON */ }
@@ -277,7 +292,7 @@ function askRenderLog() {
     log.append(askEl('div', {class: 'ask-empty'},
       'Ask about your card spending and cash accounts, or ask it to organize things ("Maple Street Studio is my ' +
       'pottery class, not shopping"); changes come back as proposals you apply. Answers come only from Flow\'s data; Claude sees summaries ' +
-      'with cards shown as "Card A", and every request is in the AI privacy log (AI in the top bar).'));
+      'with cards shown as "Card A", and every request is in the AI privacy log (Settings → AI in the top bar).'));
     const sug = askEl('div', {class: 'ask-suggest'}, askEl('div', {class: 'lbl'}, 'Try'));
     askSuggestions().forEach(q => sug.append(askEl('button', {onclick: () => askSend(q)}, q)));
     log.append(sug);

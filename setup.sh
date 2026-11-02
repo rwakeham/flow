@@ -249,7 +249,7 @@ APP_PORT=$(_env_get APP_PORT)
 header "Dashboard password"
 
 # Flow keeps the password itself (as a hash in its database) once it has started: this
-# value is for the first start, and a reset while it stays in .env. Sign out ▾ → Change
+# value is for the first start, and a reset while it stays in .env. Settings → Account → Change
 # password changes it in the app.
 EXISTING_PASS=$(_env_get FLOW_PASSWORD)
 
@@ -279,7 +279,7 @@ if [ -n "$EXISTING_PASS" ]; then
     success "Dashboard password unchanged"
   fi
 elif [ "$VOLUME_EXISTS" -gt 0 ]; then
-  info "Flow keeps the dashboard password itself (Sign out ▾ → Change password in the app)."
+  info "Flow keeps the dashboard password itself (Settings → Account → Change password in the app)."
   read -rp "  Reset it from here? [y/N] " RESET_PASS
   if [[ "${RESET_PASS:-n}" =~ ^[Yy]$ ]]; then
     _read_new_password "New dashboard password"
@@ -298,19 +298,19 @@ header "AI features (optional)"
 # Card categorization, insights and the Assistant use the Anthropic API with the user's
 # own key. Flow keeps the key itself (encrypted in its database) once it has started: a key
 # entered here is for the first start, or a replacement while it stays in .env. The models,
-# the on/off switch and the redact words are set under AI in Flow's top bar.
+# the on/off switch and the redact words are set under Settings → AI in Flow.
 EXISTING_KEY=$(_env_get ANTHROPIC_API_KEY)
 if [ -n "$EXISTING_KEY" ]; then
   success "ANTHROPIC_API_KEY is set in .env (…${EXISTING_KEY: -4})"
   read -rp "  Change it? [y/N] " SET_AI
 elif [ "$VOLUME_EXISTS" -gt 0 ]; then
-  info "The API key, models and other AI settings are managed under AI in Flow's top bar."
+  info "The API key, models and other AI settings are managed under Settings → AI in Flow."
   read -rp "  Set a key from here instead? [y/N] " SET_AI
 else
   info "Flow can use Claude to categorize card merchants its rules don't know, write"
   info "spending insights, and answer questions in the Assistant. It needs your own"
   info "Anthropic API key (console.anthropic.com). Without one, nothing is sent anywhere."
-  info "You can also add it later under AI in Flow's top bar."
+  info "You can also add it later under Settings → AI in Flow."
   read -rp "  Set up the API key now? [y/N] " SET_AI
 fi
 
@@ -325,7 +325,7 @@ if [[ "${SET_AI:-n}" =~ ^[Yy]$ ]]; then
     if [ -z "$NEW_KEY" ]; then break; fi
     if [ "$NEW_KEY" = "off" ]; then
       _env_unset ANTHROPIC_API_KEY
-      success "ANTHROPIC_API_KEY removed from .env (Flow keeps whatever key it holds; remove that under AI in the top bar)"
+      success "ANTHROPIC_API_KEY removed from .env (Flow keeps whatever key it holds; remove that under Settings → AI)"
       break
     fi
     if ! [[ "$NEW_KEY" =~ ^[A-Za-z0-9_-]+$ ]]; then
@@ -338,7 +338,7 @@ if [[ "${SET_AI:-n}" =~ ^[Yy]$ ]]; then
     fi
     _env_set ANTHROPIC_API_KEY "$NEW_KEY"
     JUST_SET="${JUST_SET} ANTHROPIC_API_KEY"
-    success "API key saved (…${NEW_KEY: -4}); models and the rest are under AI in Flow's top bar"
+    success "API key saved (…${NEW_KEY: -4}); models and the rest are under Settings → AI in Flow"
     break
   done
 else
@@ -351,14 +351,14 @@ fi
 # while it is there, so offer to take out what this run didn't just set.
 if [ "$VOLUME_EXISTS" -gt 0 ]; then
   LEFTOVER=""
-  for _key in FLOW_PASSWORD ANTHROPIC_API_KEY FLOW_AI_MODEL FLOW_AI_MODEL_CATEGORIZE FLOW_AI_MODEL_ASK FLOW_AI_ENABLED FLOW_AI_REDACT FLOW_UPDATE_CHECK; do
+  for _key in FLOW_PASSWORD ANTHROPIC_API_KEY FLOW_AI_MODEL FLOW_AI_MODEL_CATEGORIZE FLOW_AI_MODEL_ASK FLOW_AI_ENABLED FLOW_AI_REDACT FLOW_UPDATE_CHECK FLOW_BACKUP_DAILY FLOW_BACKUP_KEEP FLOW_BACKUP_HOUR; do
     [[ " $JUST_SET " == *" $_key "* ]] && continue
     [[ -n "$(_env_get "$_key")" ]] && LEFTOVER="${LEFTOVER} ${_key}"
   done
   if [[ -n "${LEFTOVER// /}" ]]; then
     header "Values Flow keeps itself"
     info "Flow copied these into its own settings when it started, and manages them in the app"
-    info "(AI in the top bar; Sign out ▾ → Change password). While they stay in .env they win:"
+    info "(Settings → AI and Settings → Account in Flow). While they stay in .env they win:"
     info " ${LEFTOVER}"
     read -rp "  Remove them from .env now? [y/N] " DROP
     if [[ "${DROP:-n}" =~ ^[Yy]$ ]]; then

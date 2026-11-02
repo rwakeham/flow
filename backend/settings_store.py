@@ -5,7 +5,7 @@ Two kinds of value:
 
 * **Settings** (``flow_settings`` rows; they travel in backups): the AI models, whether AI
   calls are on, the extra words stripped from merchant names (changed in the AI dialog), and
-  whether the daily update check runs (Sign out ▾).
+  whether the daily update check runs (Settings → Updates).
 * **Secrets** (``flow_secrets`` rows; never in a backup): the dashboard password as a
   scrypt hash (nothing ever needs it back, only to check it) and the Anthropic API key,
   encrypted with AES-GCM under a key derived from SECRET_KEY. SECRET_KEY stays in .env
@@ -46,6 +46,9 @@ AI_MODEL_ASK = "ai_model_ask"
 AI_ENABLED = "ai_enabled"
 AI_REDACT = "ai_redact"
 UPDATE_CHECK = "update_check"
+BACKUP_DAILY = "backup_daily"        # the daily backup (backup_service.loop): on unless switched off
+BACKUP_KEEP = "backup_keep"          # automatic backups kept (newest N; 0 keeps all)
+BACKUP_HOUR = "backup_hour"          # UTC hour the daily backup is taken at or after
 SETTING_ENV = {
     AI_MODEL: "FLOW_AI_MODEL",
     AI_MODEL_CATEGORIZE: "FLOW_AI_MODEL_CATEGORIZE",
@@ -53,7 +56,12 @@ SETTING_ENV = {
     AI_ENABLED: "FLOW_AI_ENABLED",
     AI_REDACT: "FLOW_AI_REDACT",
     UPDATE_CHECK: "FLOW_UPDATE_CHECK",
+    BACKUP_DAILY: "FLOW_BACKUP_DAILY",
+    BACKUP_KEEP: "FLOW_BACKUP_KEEP",
+    BACKUP_HOUR: "FLOW_BACKUP_HOUR",
 }
+BACKUP_KEEP_DEFAULT, BACKUP_KEEP_MAX = 30, 3650
+BACKUP_HOUR_DEFAULT = 3
 MODEL_SETTINGS = (AI_MODEL, AI_MODEL_CATEGORIZE, AI_MODEL_ASK)
 
 PASSWORD_HASH = "password_hash"
@@ -93,6 +101,35 @@ def ai_enabled_flag() -> bool:
 def update_check_flag() -> bool:
     """Whether the daily release check runs: on unless switched off (update_check.py)."""
     return setting(UPDATE_CHECK).lower() not in OFF_WORDS
+
+
+def backup_daily_flag() -> bool:
+    """Whether the daily backup runs (backup_service.loop): on unless switched off."""
+    return setting(BACKUP_DAILY).lower() not in OFF_WORDS
+
+
+def _int_setting(key: str, default: int, lo: int, hi: int) -> int:
+    try:
+        value = int(setting(key))
+    except ValueError:
+        return default
+    return min(max(value, lo), hi)
+
+
+def backup_keep() -> int:
+    """How many automatic backups are kept (the newest); 0 keeps every one."""
+    return _int_setting(BACKUP_KEEP, BACKUP_KEEP_DEFAULT, 0, BACKUP_KEEP_MAX)
+
+
+def backup_hour() -> int:
+    """The UTC hour at or after which the day's backup is taken."""
+    return _int_setting(BACKUP_HOUR, BACKUP_HOUR_DEFAULT, 0, 23)
+
+
+def env_locked_message(var: str) -> str:
+    """Why a setting can't be changed in the app: its .env variable wins while it is set."""
+    return (f"{var} is set in .env and wins while it is there. Remove it from .env (./setup.sh offers to) "
+            "and run ./deploy.sh, then change it here.")
 
 
 def redact_words() -> list[str]:

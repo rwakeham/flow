@@ -1,33 +1,15 @@
-// The AI dialog (top bar → AI): whether AI is on, which model each feature uses and where
-// that comes from, and the AI privacy log (every request and response, in full). Every AI
-// feature shares these: card categorization, the Assistant, insights and balance reading.
-// Loaded after index.html's inline script and cards.js (it reuses cards.css's table and log styles).
+// The AI section of the Settings dialog (top bar → ⚙ Settings → AI): whether AI is on, which
+// model each feature uses and where that comes from, and the AI privacy log (every request and
+// response, in full). Every AI feature shares these: card categorization, the Assistant, insights
+// and balance reading. Loaded after index.html's inline script and cards.js (it reuses cards.css's
+// table and log styles); settings.js, loaded after it, owns the dialog and calls aiRender().
 
 const AI = {log: []};
 const aiH = v => escHtml(v === null || v === undefined ? '' : String(v));
 
-function aiInject() {
-  if (document.getElementById('ai-modal')) return;
-  document.body.insertAdjacentHTML('beforeend', `
-<div id="ai-modal" class="cd-modal ai-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ai-title"><div class="modal-box">
-  <div style="display:flex;align-items:center;gap:8px"><h2 id="ai-title" style="flex:1">AI</h2>
-    <button class="btn-sm" onclick="aiClose()" aria-label="Close">✕</button></div>
-  <div id="ai-body"><div class="empty">Loading…</div></div>
-  <div class="modal-footer"><button onclick="aiClose()">Close</button></div>
-</div></div>`);
-  document.getElementById('ai-modal').addEventListener('click', e => { if (e.target.id === 'ai-modal') aiClose(); });
-}
-
-async function aiOpen() {
-  aiInject();
-  document.getElementById('ai-modal').classList.remove('hidden');
-  await aiRender();
-}
-
-function aiClose() {
-  const m = document.getElementById('ai-modal');
-  if (m) m.classList.add('hidden');
-}
+// Kept for the callers that open the AI settings directly (the Cards page's banners, the Assistant).
+function aiOpen() { settingsOpen('ai'); }
+function aiClose() { settingsClose(); }
 
 async function aiGet(url) {
   const res = await fetch(url);
@@ -110,11 +92,6 @@ async function aiRender() {
         <tr id="ai-log-${i}" class="hidden cd-log-row"><td colspan="7"></td></tr>`).join('')}
       </tbody></table></div>` : '<div class="cd-card-b cd-note">Nothing has been sent.</div>'}</div>`;
 }
-
-document.addEventListener('keydown', e => {
-  const m = document.getElementById('ai-modal');
-  if (e.key === 'Escape' && m && !m.classList.contains('hidden')) aiClose();
-});
 
 // ── Settings and the key ─────────────────────────────────────────────────────
 // The Cards page's AI banner reads the same settings: refresh it when it is on screen.

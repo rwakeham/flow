@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -6,6 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import balance_sheet
+import change_log
+import exports
 from auth import require_auth
 from database import get_db
 import import_profile_resolve
@@ -116,6 +119,7 @@ def create_account(body: AccountCreate, db: Session = Depends(get_db)):
         alert_abs=_check_alert(body.alert_abs),
     )
     db.add(acct)
+    change_log.record(db, "account", "add", f"Added {acct.account_type} account {change_log.clip(acct.name)}", {"name": acct.name, "type": acct.account_type})
     db.commit()
     return _account_json(acct)
 
@@ -125,6 +129,8 @@ def update_account(account_id: int, body: AccountUpdate, db: Session = Depends(g
     acct = db.get(Account, account_id)
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    before = {"name": acct.name, "type": acct.account_type, "ignored": acct.ignored, "archived": bool(acct.archived),
+              "institution": acct.institution, "last4": acct.last4, "alert_pct": acct.alert_pct, "alert_abs": acct.alert_abs}
     if body.name is not None:
         acct.name = _check_name(db, body.name, acct.id)
     if body.account_type is not None:
@@ -147,6 +153,12 @@ def update_account(account_id: int, body: AccountUpdate, db: Session = Depends(g
             acct.alert_pct = _check_alert(body.alert_pct)
         if "alert_abs" in body.model_fields_set:
             acct.alert_abs = _check_alert(body.alert_abs)
+    after = {"name": acct.name, "type": acct.account_type, "ignored": acct.ignored, "archived": bool(acct.archived),
+             "institution": acct.institution, "last4": acct.last4, "alert_pct": acct.alert_pct, "alert_abs": acct.alert_abs}
+    changed = {k: v for k, v in after.items() if before[k] != v}
+    if changed:
+        change_log.record(db, "account", "edit", f"Edited account {change_log.clip(before['name'])} ({', '.join(changed)})",
+                          {"id": acct.id, "before": {k: before[k] for k in changed}, "after": changed})
     db.commit()
     return _account_json(acct)
 
@@ -159,6 +171,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Account not found")
     n = db.query(Balance).filter(Balance.account_id == acct.id).delete()
     import_profile_resolve.unlink_account(db, "balance", account_id)
+    change_log.record(db, "account", "delete", f"Deleted account {change_log.clip(acct.name)} and its {n} balances", {"id": acct.id, "name": acct.name, "balances": n})
     db.delete(acct)
     db.commit()
     return {"deleted": account_id, "balances_deleted": n}
@@ -176,6 +189,24 @@ def account_balances(account_id: int, db: Session = Depends(get_db)):
         "balances": [{"period": b.period.isoformat(), "amount": float(b.amount), "source": b.source,
                       "updated_at": b.updated_at.isoformat() if b.updated_at else None} for b in rows],
     }
+
+
+@router.get("/data/export.csv")
+def export_balances_csv(layout: Literal["long", "wide"] = "long", db: Session = Depends(get_db)):
+    """The balance sheet as CSV. ``long``: every stored balance as it is (account, period, amount,
+    source). ``wide``: one row per month and a column per account as the Dashboard draws them
+    (carried values filled in and named in the last column), with the assets, liabilities and net
+    worth totals (ignored accounts left out of them). Cash register accounts are not here: the
+    register has its own export."""
+    if layout == "long":
+        rows = [{"account": a.name, "type": a.account_type, "institution": a.institution, "period": b.period.isoformat(),
+                 "amount": b.amount, "source": b.source, "updated_at": b.updated_at.isoformat() if b.updated_at else "",
+                 "ignored": a.ignored, "archived": a.archived}
+                for b, a in db.query(Balance, Account).join(Account, Account.id == Balance.account_id)
+                .order_by(Account.name, Balance.period).all()]
+        return exports.csv_response(exports.BALANCES_LONG_COLUMNS, exports.balances_long_rows(rows), "balances-long")
+    header, rows = exports.balances_wide_rows(*balance_matrix(db))
+    return exports.csv_response(header, rows, "balances-wide")
 
 
 # ── Timeseries ────────────────────────────────────────────────────────────────

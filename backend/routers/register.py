@@ -17,8 +17,10 @@ from sqlalchemy.orm import Session
 
 from auth import require_auth
 import balance_sheet
+import change_log
 from backup_service import ensure_daily_backup
 from database import get_db
+import exports
 import import_profile_resolve
 from import_dedup import (
     best_other_account,
@@ -362,24 +364,40 @@ def list_register_accounts(x_flow_today: str | None = Header(None), db: Session 
     """)).fetchall()
     sums: dict[int, float] = {row[0]: float(row[1]) for row in sum_rows}
 
-    # Newest data per account: the latest bank-imported row, else the latest entry of any kind.
-    latest = {aid: (bank, any_) for aid, bank, any_ in db.execute(text("""
-        SELECT register_account_id, MAX(date) FILTER (WHERE source = 'bank'), MAX(date)
-          FROM transactions GROUP BY register_account_id
-    """)).fetchall()}
+    signals = account_signals(db)
     today = balance_sheet.client_today(x_flow_today, DateType.today())
 
     result = []
     for acct in accounts:
         opening, _ = _effective_opening(acct)
         row = _acct_dict(acct, opening + sums.get(acct.id, 0.0))
-        bank, any_ = latest.get(acct.id, (None, None))
+        sig = signals.get(acct.id, {})
+        bank, any_ = sig.get("newest_bank"), sig.get("newest_any")
         newest = bank or any_
         row["latest_date"] = newest.isoformat() if newest else None
         row["latest_source"] = ("bank" if bank else "manual") if newest else None
         row["behind"] = newest is None or (today - newest).days > REGISTER_BEHIND_DAYS
+        row["unmatched"] = sig.get("unmatched", 0)
+        row["pending"] = sig.get("pending", 0)
         result.append(row)
     return result
+
+
+def account_signals(db: Session) -> dict[int, dict]:
+    """Per cash account, in one query: the newest bank-imported row and the newest row of any kind
+    (Manage Accounts' "behind"), and the bank rows waiting in Reconcile: ``unmatched`` (no ledger
+    entry matched, not marked reconciled: the reconcile view's unmatched_bank rule) and ``pending``
+    (auto-matched, awaiting confirmation)."""
+    rows = db.execute(text("""
+        SELECT register_account_id,
+               MAX(date) FILTER (WHERE source = 'bank'),
+               MAX(date),
+               COUNT(*) FILTER (WHERE source = 'bank' AND matched_to_id IS NULL AND NOT is_reconciled),
+               COUNT(*) FILTER (WHERE source = 'bank' AND matched_to_id IS NOT NULL AND NOT is_reconciled)
+          FROM transactions GROUP BY register_account_id
+    """)).fetchall()
+    return {aid: {"newest_bank": bank, "newest_any": any_, "unmatched": int(unmatched), "pending": int(pending)}
+            for aid, bank, any_, unmatched, pending in rows}
 
 
 @router.post("/accounts", status_code=201)
@@ -393,6 +411,8 @@ def create_register_account(body: RegisterAccountCreate, db: Session = Depends(g
                            institution=(body.institution or "").strip() or None,
                            notes=(body.notes or "").strip() or None, is_default=body.is_default)
     db.add(acct)
+    change_log.record(db, "register", "add_account", f"Added cash account {change_log.clip(acct.name)}",
+                      {"name": acct.name, "opening_balance": float(acct.opening_balance), "is_default": bool(acct.is_default)})
     db.commit()
     db.refresh(acct)
     return _acct_dict(acct, float(acct.opening_balance))
@@ -403,6 +423,8 @@ def update_register_account(account_id: int, body: RegisterAccountUpdate, db: Se
     acct = db.get(RegisterAccount, account_id)
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    before = {"name": acct.name, "notes": acct.notes, "institution": acct.institution, "cutoff_date": str(acct.cutoff_date or ""),
+              "cutoff_balance": None if acct.cutoff_balance is None else float(acct.cutoff_balance), "is_default": bool(acct.is_default)}
     if body.name is not None:
         conflict = db.query(RegisterAccount).filter(
             RegisterAccount.name == body.name,
@@ -425,6 +447,12 @@ def update_register_account(account_id: int, body: RegisterAccountUpdate, db: Se
         if body.is_default:
             db.query(RegisterAccount).filter(RegisterAccount.id != account_id).update({"is_default": False})
         acct.is_default = body.is_default
+    after = {"name": acct.name, "notes": acct.notes, "institution": acct.institution, "cutoff_date": str(acct.cutoff_date or ""),
+             "cutoff_balance": None if acct.cutoff_balance is None else float(acct.cutoff_balance), "is_default": bool(acct.is_default)}
+    changed = {k: v for k, v in after.items() if before[k] != v}
+    if changed:
+        change_log.record(db, "register", "edit_account", f"Edited cash account {change_log.clip(before['name'])} ({', '.join(changed)})",
+                          {"id": acct.id, "before": {k: before[k] for k in changed}, "after": changed})
     db.commit()
     db.refresh(acct)
     opening, cutoff_date = _effective_opening(acct)
@@ -443,6 +471,7 @@ def delete_register_account(account_id: int, db: Session = Depends(get_db)):
     if acct is None:
         raise HTTPException(status_code=404, detail="Account not found")
     import_profile_resolve.unlink_account(db, "cash", account_id)
+    change_log.record(db, "register", "delete_account", f"Deleted cash account {change_log.clip(acct.name)} and its transactions", {"id": acct.id, "name": acct.name})
     db.delete(acct)
     db.commit()
 
@@ -509,6 +538,22 @@ def list_transactions(account_id: int, db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/{account_id}/export.csv")
+def export_register_csv(account_id: int, db: Session = Depends(get_db)):
+    """The account's ledger as CSV: every row after the cutoff with the running balance as the
+    register shows it (manual rows and unmatched bank rows count; a matched bank row is listed with
+    the balance unchanged). The page's search and filters don't apply."""
+    acct = db.get(RegisterAccount, account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    opening, cutoff_date = _effective_opening(acct)
+    query = db.query(Transaction).filter(Transaction.register_account_id == account_id)
+    if cutoff_date:
+        query = query.filter(Transaction.date >= cutoff_date)
+    result = _compute_running_balance(opening, query.all())
+    return exports.csv_response(exports.REGISTER_COLUMNS, exports.register_rows(result["transactions"]), acct.name)
+
+
 @router.post("/{account_id}/transactions", status_code=201)
 def create_transaction(account_id: int, body: TransactionCreate, db: Session = Depends(get_db)):
     acct = db.get(RegisterAccount, account_id)
@@ -524,6 +569,8 @@ def create_transaction(account_id: int, body: TransactionCreate, db: Session = D
         notes=body.notes,
     )
     db.add(txn)
+    change_log.record(db, "register", "add", f"Added {txn.date} {change_log.clip(txn.description)} {change_log.money(txn.amount)} in {change_log.clip(acct.name)}",
+                      {"account_id": acct.id, "date": str(txn.date), "description": txn.description, "amount": float(txn.amount)})
     db.commit()
     db.refresh(txn)
     return _txn_dict(txn)
@@ -536,6 +583,7 @@ def update_transaction(txn_id: int, body: TransactionUpdate, db: Session = Depen
         raise HTTPException(status_code=404, detail="Transaction not found")
     if txn.source != "manual":
         raise HTTPException(status_code=422, detail="Only manual transactions can be edited")
+    before = {"date": str(txn.date), "description": txn.description, "amount": float(txn.amount), "notes": txn.notes}
 
     if body.date is not None:
         txn.date = body.date
@@ -545,6 +593,12 @@ def update_transaction(txn_id: int, body: TransactionUpdate, db: Session = Depen
         txn.amount = body.amount
     if "notes" in body.model_fields_set:
         txn.notes = body.notes
+    after = {"date": str(txn.date), "description": txn.description, "amount": float(txn.amount), "notes": txn.notes}
+    changed = {k: v for k, v in after.items() if before[k] != v}
+    if changed:
+        acct = db.get(RegisterAccount, txn.register_account_id)
+        change_log.record(db, "register", "edit", f"Edited {after['date']} {change_log.clip(after['description'])} {change_log.money(after['amount'])} in {change_log.clip(acct.name if acct else '')}",
+                          {"id": txn.id, "before": {k: before[k] for k in changed}, "after": changed})
 
     db.commit()
     db.refresh(txn)
@@ -564,6 +618,9 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_db)):
             partner.matched_to_id = None
             partner.is_reconciled = False
 
+    acct = db.get(RegisterAccount, txn.register_account_id)
+    change_log.record(db, "register", "delete", f"Deleted {txn.date} {change_log.clip(txn.description)} {change_log.money(txn.amount)} from {change_log.clip(acct.name if acct else '')}",
+                      {"id": txn.id, "source": txn.source, "date": str(txn.date), "description": txn.description, "amount": float(txn.amount)})
     db.delete(txn)
     db.commit()
 
@@ -745,6 +802,10 @@ async def import_csv(
         result = _import_ledger_rows(ip.to_ledger_rows(parsed), account_id, db, cutoff_date)
     else:
         result = _import_bank_rows(ip.to_bank_rows(parsed), account_id, db, cutoff_date)
+    extra = (f", {result['auto_matched']} auto-matched" if result.get("auto_matched") else "")
+    change_log.record(db, "register", "import", f"Imported {change_log.clip(filename, 40)} into {change_log.clip(acct.name)}: {result.get('imported', 0)} rows ({result.get('skipped', 0)} already on file{extra})",
+                      {"account_id": acct.id, "format": c.name, "filename": filename, **{k: v for k, v in result.items() if isinstance(v, int)}})
+    db.commit()
     return {**result, **_format_info(c, parsed, check)}
 
 
@@ -1012,6 +1073,8 @@ def match_transactions(body: MatchBody, db: Session = Depends(get_db)):
     manual_txn.matched_to_id = bank_txn.id
     manual_txn.is_reconciled = True
     _reconcile_manual_to_bank(manual_txn, bank_txn)
+    change_log.record(db, "reconcile", "match", f"Matched bank row {bank_txn.date} {change_log.clip(bank_txn.bank_description or bank_txn.description)} {change_log.money(bank_txn.amount)} to {change_log.clip(manual_txn.description)}",
+                      {"bank_txn_id": bank_txn.id, "manual_txn_id": manual_txn.id})
 
     db.commit()
     return {"bank_txn_id": bank_txn.id, "manual_txn_id": manual_txn.id}
@@ -1033,6 +1096,8 @@ def unmatch_transaction(body: UnmatchBody, db: Session = Depends(get_db)):
             partner.matched_to_id = None
             partner.is_reconciled = False
 
+    change_log.record(db, "reconcile", "unmatch", f"Unmatched {txn.date} {change_log.clip(txn.description or txn.bank_description)} {change_log.money(txn.amount)}",
+                      {"txn_id": txn.id, "partner_id": txn.matched_to_id})
     txn.matched_to_id = None
     txn.is_reconciled = False
 
@@ -1046,6 +1111,7 @@ def mark_reconciled(txn_id: int, db: Session = Depends(get_db)):
     if txn is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     txn.is_reconciled = True
+    change_log.record(db, "reconcile", "mark", f"Marked {txn.date} {change_log.clip(txn.description or txn.bank_description)} {change_log.money(txn.amount)} reconciled", {"txn_id": txn.id})
     db.commit()
     return _txn_dict(txn)
 
@@ -1086,6 +1152,8 @@ def add_to_ledger(body: AddToLedgerBody, db: Session = Depends(get_db)):
     bank_txn.is_reconciled = True
     manual_txn.matched_to_id = bank_txn.id
     manual_txn.is_reconciled = True
+    change_log.record(db, "reconcile", "add_ledger", f"Added bank row {bank_txn.date} {change_log.clip(description)} {change_log.money(bank_txn.amount)} to the ledger",
+                      {"bank_txn_id": bank_txn.id, "manual_txn_id": manual_txn.id})
 
     db.commit()
     db.refresh(manual_txn)
@@ -1120,5 +1188,7 @@ def bulk_add_to_ledger(body: BulkAddToLedgerBody, db: Session = Depends(get_db))
         manual_txn.matched_to_id = bank_txn.id
         manual_txn.is_reconciled = True
         added += 1
+    if added:
+        change_log.record(db, "reconcile", "bulk_ledger", f"Added {added} bank rows to the ledger", {"count": added, "requested": len(body.bank_txn_ids)})
     db.commit()
     return {"added": added}

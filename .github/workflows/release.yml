@@ -1,7 +1,7 @@
 # Every push to main releases: the run works out the next version from the commits since
 # the last release, privacy-checks the tree and the notes, commits the bump to
 # backend/VERSION, tags it v<version> with the notes and publishes the GitHub Release. A push
-# that changed only docs, tests or CI waits for the next user-facing change. A manual run
+# that changed only tests or CI waits for the next user-facing change. A manual run
 # (Actions -> Release -> Run workflow, on main) does the same with a bump you pick, or a dry
 # run, and releases a docs-only change as a patch. See .github/release/README.md.
 #
@@ -60,10 +60,16 @@ jobs:
         id: next
         env:
           BUMP: ${{ inputs.bump || 'auto' }}
+          EVENT: ${{ github.event_name }}
         run: |
           python3 .github/release/release.py next --bump "$BUMP" --ok-if-nothing \
             > "$RUNNER_TEMP/next" 2> "$RUNNER_TEMP/why"
           cat "$RUNNER_TEMP/next" >> "$GITHUB_OUTPUT"
+          # Only tests or CI changed and nobody asked for a release: the first line
+          # would show a bump that will not happen, so say so instead.
+          if [[ "$EVENT" != "workflow_dispatch" ]] && grep -qx 'trivial=true' "$RUNNER_TEMP/next"; then
+            sed -i '1s/^\(Flow [0-9.]*\) -> [0-9.]* (patch)$/\1: no release yet (would be a patch)/' "$RUNNER_TEMP/why"
+          fi
           cat "$RUNNER_TEMP/why"
           { echo '```'; cat "$RUNNER_TEMP/why"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
@@ -81,7 +87,7 @@ jobs:
           if [[ "$NOTHING" == "true" ]]; then
             why="nothing to release since the last release"
           elif [[ "$EVENT" != "workflow_dispatch" && "$TRIVIAL" == "true" ]]; then
-            why="preview of ${TAG}: only docs, tests or CI changed since the last release; released with the next user-facing change, or by a manual run"
+            why="preview of ${TAG}: only tests or CI changed since the last release; released with the next user-facing change, or by a manual run"
           elif [[ "$EVENT" == "pull_request" ]]; then
             why="preview of ${TAG}: merging releases it"
           elif [[ "$REF" != "refs/heads/main" ]]; then

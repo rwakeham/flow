@@ -193,16 +193,20 @@ def test_breaking_markers_mean_major():
     assert R.commit_level(_c("Breaking: .env needs FLOW_X"))[0] == "major"
 
 
-def test_docs_tests_and_ci_alone_are_a_patch():
-    commits = [_c("Reword the quick start", files=["README.md", "docs/screenshots/a.png"]),
-               _c("More tests", files=["backend/test_cards.py", "tests/test_deploy_script.py"]),
-               _c("Pin actions", files=[".github/workflows/ci.yml", ".claude/settings.json"])]
-    assert all(R.commit_level(c)[0] == "none" for c in commits)
-    n = R.next_release("3.1.0", ["v3.1.0"], commits)
+def test_docs_alone_are_a_patch_but_tests_and_ci_wait():
+    docs = _c("Reword the quick start", files=["README.md", "docs/screenshots/a.png"])
+    assert R.commit_level(docs)[0] == "patch"
+    assert R.commit_level(_c("Docs and CI", files=["README.md", ".github/workflows/ci.yml"]))[0] == "patch"
+    internal = [_c("More tests", files=["backend/test_cards.py", "tests/test_deploy_script.py"]),
+                _c("Pin actions", files=[".github/workflows/ci.yml", ".claude/settings.json"]),
+                _c("Update guide", files=["CLAUDE.md"])]
+    assert all(R.commit_level(c)[0] == "none" for c in internal)
+    n = R.next_release("3.1.0", ["v3.1.0"], internal)
     assert (n.version, n.level) == ("3.1.1", "patch")
     # ... and marked trivial, so a push to main doesn't release until something user-facing lands.
     assert n.trivial and "trivial=true" in n.lines()
-    assert not R.next_release("3.1.0", ["v3.1.0"], commits + [_c("Fix a thing")]).trivial
+    assert not R.next_release("3.1.0", ["v3.1.0"], internal + [docs]).trivial
+    assert not R.next_release("3.1.0", ["v3.1.0"], internal + [_c("Fix a thing")]).trivial
 
 
 def test_a_chosen_level_overrides_auto():

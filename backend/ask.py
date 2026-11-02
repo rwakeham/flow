@@ -28,7 +28,7 @@ import ask_files
 import ask_proposals
 import card_ai
 
-PROMPT_VERSION = "ask-v6"
+PROMPT_VERSION = "ask-v7"
 MAX_ROUNDS = 5
 ROUND_MAX_TOKENS = 4000          # per round, thinking included
 MAX_INPUT_TOKENS = 120_000       # per question, cached reads included
@@ -40,8 +40,12 @@ MAX_HISTORY = 8
 MAX_QUESTION_CHARS = 1000
 MAX_ANSWER_CHARS = 4000
 OFF_TOPIC = "OFF_TOPIC"
-DECLINED_MESSAGE = ("The Assistant only helps with your spending, cards, cash accounts and how Flow organizes "
-                    "them.")
+NEEDS_ACCESS = "NEEDS_ACCESS"
+_ACCESS_RE = re.compile(r"^\W*NEEDS_ACCESS\W+(cards|cash|balances)\W*$", re.IGNORECASE)
+AREA_TOPICS = {"cards": "your card spending", "cash": "your cash accounts", "balances": "your net worth"}
+AREA_LABELS = {"cards": "card spending", "cash": "cash accounts", "balances": "balance sheet"}   # card_ai.AREA_LABELS
+DECLINED_MESSAGE = ("The Assistant only helps with your spending, cards, cash accounts, net worth and how Flow "
+                    "organizes them.")
 CUT_SHORT = "…(cut short)"
 FINAL_ROUND_NOTE = ("Tools are now off for this question. Write the final answer from what you have: what you "
                     "found, the proposals already made, and which further proposals you would make if the user asks "
@@ -51,7 +55,8 @@ STUCK_CHECK_EVERY = 400          # characters of streamed text between checks
 
 RULES = f"""You are the Assistant, a chat panel inside Flow, a self-hosted personal finance app \
 for one household. You answer only from Flow's data: the INDEX below and the results of the lookup \
-tools. Cards appear as "Card A", "Card B" and cash (checking/savings) accounts as "Account A"; \
+tools. Cards appear as "Card A", "Card B", cash (checking/savings) accounts as "Account A" and \
+balance-sheet accounts (investments, loans, lines of credit) as "Asset A" / "Liability A"; \
 use those names one at a time ("Card A and Card B", not "Cards A and B"); the app shows the \
 real ones.
 
@@ -72,7 +77,11 @@ transfers between accounts, which are not spending.
 item's status is "active", "overdue" (no charge for about 1.6 of its periods; still counted in \
 monthly totals) or "ended" (about two missed charges, or the user marked it ended; not counted in \
 totals). Ended items are past spending: never present them as current costs.
-- You cannot see net worth, investment or loan balances; say so if asked.
+- Net worth, the balance sheet and each account's balance history come from the index's net_worth \
+block (the latest month) and the net_worth lookup (by month, with each account's value and change). \
+Liabilities are negative and net worth is assets plus liabilities; cash accounts count as assets, as \
+on the Dashboard. A carried value is the last one entered, not a new reading: say so when it matters. \
+Card balances are not in net worth unless the user tracks the card as a liability there.
 
 Advice
 - When asked where to save, cut back or trim, or what to focus on, answer from the index's \
@@ -125,14 +134,47 @@ Style
 - Lead with the answer. Plain text; "- " bullets and **bold** only; no headings, tables or links \
 (the app adds sources). Short dates such as "Oct 20". Be brief.
 - If the question is not about this household's spending, cards, cash accounts, bills, \
-subscriptions, budgeting, how Flow organizes them, or how Flow's numbers work, reply with exactly \
-{OFF_TOPIC} and nothing else."""
+subscriptions, budgeting, net worth and account balances, how Flow organizes them, or how Flow's \
+numbers work, reply with exactly {OFF_TOPIC} and nothing else."""
+
+ACCESS_RULES = """
+
+Access
+- The user switched these data areas off for the AI under Settings → AI: {off}. You have no index block, \
+lookup or proposal for them, and you must not guess at them. If the question needs one of them, reply \
+with exactly {sentinel} <area> and nothing else, where area is cards, cash or balances (the one it needs \
+most). Answer from the areas you have whenever they are enough."""
+
+
+def declined_message(areas: dict | None = None) -> str:
+    """DECLINED_MESSAGE naming only the areas that are on."""
+    on = ask_data.areas_on(areas)
+    topics = [AREA_TOPICS[a] for a in ask_data.AREAS if on[a]]
+    if len(topics) == 3:
+        return DECLINED_MESSAGE
+    return f"The Assistant only helps with {', '.join(topics)} and how Flow organizes them."
+
+
+def access_message(area: str) -> str:
+    return (f"That needs your {AREA_LABELS[area]}, which is switched off for the AI under Settings → AI. "
+            "Turn it on there to ask about it.")
+
+
+def rules(areas: dict | None = None) -> str:
+    """The system prompt: RULES, plus the Access paragraph while an area is switched off."""
+    on = ask_data.areas_on(areas)
+    off = [AREA_LABELS[a] for a in ask_data.AREAS if not on[a]]
+    if not off:
+        return RULES
+    return RULES + ACCESS_RULES.format(off=", ".join(off), sentinel=NEEDS_ACCESS)
+
 
 TOPIC_SYSTEM = """You decide whether a question belongs in the Assistant, a chat panel in Flow, a \
 personal finance app for one household.
 
 Relevant: the household's own card spending, merchants, categories, subscriptions and recurring \
-charges, bills, cash (checking/savings) accounts, balances and transactions, budgeting and ways to \
+charges, bills, cash (checking/savings) accounts, balances and transactions, net worth and the \
+balance sheet (investment, loan and other account balances and how they changed), budgeting and ways to \
 trim spending, requests to change how Flow categorizes, names or tracks them (new categories, \
 recategorizing a merchant, rules by amount, recurring charges), how Flow's numbers or pages work, \
 and short follow-ups to the previous answer ("why?", "and last month?", "do it").
@@ -305,14 +347,17 @@ def trim_stuck(text: str) -> str:
 
 
 def answer(client, data: ask_data.AskData, history: list[dict], page: dict | None, log: LogFn,
-           meta: dict | None = None, attachment: dict | None = None) -> Iterator[dict]:
+           meta: dict | None = None, attachment: dict | None = None, areas: dict | None = None) -> Iterator[dict]:
     """
     Stream events for one question: status, text, reset, then exactly one of
-    final, declined or error. ``history`` is validate_history output.
+    final, declined or error. ``history`` is validate_history output. ``areas`` (cards, cash,
+    balances: card_ai.areas_enabled) picks the index blocks, lookups and proposals offered.
     """
     meta = meta or {}
-    index_text = json.dumps(ask_data.build_index(data, page), sort_keys=True)
-    system = [{"type": "text", "text": RULES}, {"type": "text", "text": "INDEX (JSON):\n" + index_text}]
+    index_text = json.dumps(ask_data.build_index(data, page, areas), sort_keys=True)
+    system = [{"type": "text", "text": rules(areas)}, {"type": "text", "text": "INDEX (JSON):\n" + index_text}]
+    tools = ask_data.tools_for(areas) + ask_proposals.tools_for(areas)
+    offered = {t["name"] for t in tools}
     # The browser shows real card and account names; they go back to aliases before anything is sent.
     history = [{**m, "text": ask_data.realias(m["text"], data)} for m in history]
     messages: list[dict] = [{"role": m["role"], "content": m["text"]} for m in history]
@@ -328,7 +373,7 @@ def answer(client, data: ask_data.AskData, history: list[dict], page: dict | Non
     for rnd in range(1, MAX_ROUNDS + 1):
         tools_on = rnd < MAX_ROUNDS and in_total < MAX_INPUT_TOKENS and out_total < MAX_OUTPUT_TOKENS
         kwargs = dict(
-            model=model, max_tokens=ROUND_MAX_TOKENS, system=system, tools=ask_data.TOOLS + ask_proposals.TOOLS,
+            model=model, max_tokens=ROUND_MAX_TOKENS, system=system, tools=tools,
             tool_choice={"type": "auto" if tools_on else "none"}, messages=messages,
             output_config={"effort": "medium"}, cache_control={"type": "ephemeral"},
             **card_ai.fallback_kwargs(model),
@@ -377,6 +422,13 @@ def answer(client, data: ask_data.AskData, history: list[dict], page: dict | Non
             results = []
             lookups = props = 0
             for b in tool_uses:
+                if b.name not in offered:       # a tool of an area that is off, or one that never existed
+                    area = ask_data.TOOL_AREA.get(b.name) or ask_proposals.TOOL_AREA.get(b.name)
+                    why = (f"the {AREA_LABELS[area]} area is switched off under Settings → AI" if area
+                           else "there is no such tool")
+                    results.append({"type": "tool_result", "tool_use_id": b.id, "is_error": True,
+                                    "content": f"Not run: {why}."})
+                    continue
                 if b.name in ask_proposals.TOOL_NAMES:
                     props += 1
                     props_total += 1
@@ -423,7 +475,12 @@ def answer(client, data: ask_data.AskData, history: list[dict], page: dict | Non
 
     usage = {"input_tokens": in_total, "output_tokens": out_total}
     if final_text.strip().strip(".") == OFF_TOPIC:
-        yield {"type": "declined", "message": DECLINED_MESSAGE, "usage": usage}
+        yield {"type": "declined", "message": declined_message(areas), "usage": usage}
+        return
+    access = _ACCESS_RE.match(final_text)
+    if access:
+        area = access.group(1).lower()
+        yield {"type": "declined", "kind": "access", "area": area, "message": access_message(area), "usage": usage}
         return
     if not final_text:
         yield {"type": "error", "message": "No answer was produced."}

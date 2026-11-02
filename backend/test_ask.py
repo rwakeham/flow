@@ -19,7 +19,8 @@ os.environ.setdefault("SECRET_KEY", "test-" * 8)                                
 import ask  # noqa: E402
 import ask_data  # noqa: E402
 import card_ai  # noqa: E402
-from ask_data import AskData, Card, CashAccount, CashTxn, Upcoming  # noqa: E402
+import balance_sheet  # noqa: E402
+from ask_data import AskData, BalanceAccount, Card, CashAccount, CashTxn, Upcoming  # noqa: E402
 from card_analytics import Row  # noqa: E402
 
 NS = types.SimpleNamespace
@@ -56,10 +57,20 @@ def fixture() -> AskData:
                  CashTxn(7, TODAY - timedelta(days=8), -1850.0, "Mortgage"),
                  CashTxn(7, TODAY - timedelta(days=3), -60.0, ask_data.WITHHELD)]
     upcoming = [Upcoming(7, "Mortgage", -1850.0, TODAY + timedelta(days=22), "monthly")]
+    # The balance sheet: July, August and October 2026 (no September at all), the brokerage not updated in
+    # October (carried), one ignored account. Liabilities are stored negative.
+    periods = [date(2026, 7, 1), date(2026, 8, 1), date(2026, 10, 1)]
+    balance_accounts = [BalanceAccount(1, "Brokerage at Example Bank", "Asset A", "asset"),
+                        BalanceAccount(2, "Example Home", "Asset B", "asset"),
+                        BalanceAccount(3, "Example Mortgage", "Liability A", "liability"),
+                        BalanceAccount(4, "Old Savings", "Asset C", "asset", ignored=True)]
+    raw = {1: [50000.0, 52000.0, None], 2: [300000.0, 300000.0, 300000.0],
+           3: [-200000.0, -199000.0, -198000.0], 4: [5000.0, 5000.0, 5000.0]}
+    matrix = {aid: balance_sheet.carry_forward(vals) for aid, vals in raw.items()}
     return AskData(today=TODAY, cards=[Card(1, "Travel Rewards Card", "Card A", TODAY - timedelta(days=200), TODAY - timedelta(days=1)),
                                        Card(2, "Everyday Cash Back", "Card B", TODAY - timedelta(days=200), TODAY - timedelta(days=1))],
                    rows=rows, recurring=recurring, cash=cash, cash_txns=cash_txns, upcoming=upcoming,
-                   names=["Jane Doe"])
+                   names=["Jane Doe"], balance_accounts=balance_accounts, balance_periods=periods, balance_matrix=matrix)
 
 
 # ── Fake Claude ──────────────────────────────────────────────────────────────
@@ -117,10 +128,10 @@ def client(rounds, relevant=True):
     return NS(beta=NS(messages=FakeMessages(rounds, relevant)))
 
 
-def run(rounds, question="Where can I trim spending?", page=None, data=None, history=None):
+def run(rounds, question="Where can I trim spending?", page=None, data=None, history=None, areas=None):
     c, logged = client(rounds), []
     hist = ask.validate_history((history or []) + [{"role": "user", "text": question}])
-    events = list(ask.answer(c, data or fixture(), hist, page, lambda *a: logged.append(a)))
+    events = list(ask.answer(c, data or fixture(), hist, page, lambda *a: logged.append(a), areas=areas))
     return events, c.beta.messages, logged
 
 
@@ -189,7 +200,8 @@ def test_lookup_output_has_no_links_and_page_precision():
     data = fixture()
     for name, args in [("trim_details", {"rank": 1}), ("spending_breakdown",
                         {"group_by": "merchant", "months": 6, "category": "Groceries", "merchant": "", "card": ""}),
-                       ("subscriptions", {"include_habitual": True}), ("cash_summary", {"account": "", "months": 3})]:
+                       ("subscriptions", {"include_habitual": True}), ("cash_summary", {"account": "", "months": 3}),
+                       ("net_worth", {"months": 0, "account": ""}), ("net_worth", {"months": 2, "account": "Asset A"})]:
         out, sources = ask_data.run(name, args, data)
         assert '"nav"' not in out and "http" not in out and sources
         for v in _numbers(json.loads(out)):
@@ -228,6 +240,60 @@ def test_find_transactions_caps_rows_and_counts_all():
     assert json.loads(out)["shown"] == 5
 
 
+def test_net_worth_matches_the_dashboard():
+    # The Dashboard chart: balance-sheet months lined up with the cash register's, cash counted as an asset,
+    # ignored accounts left out, a missing month carried. Cash (3,290) has rows only in October.
+    out, sources = ask_data.run("net_worth", {"months": 0, "account": ""}, fixture())
+    r = json.loads(out)
+    assert [m["month"] for m in r["by_month"]] == ["2026-07", "2026-08", "2026-10"]
+    assert r["by_month"][0] == {"month": "2026-07", "assets": 350000.0, "liabilities": -200000.0, "net_worth": 150000.0,
+                                "carried_accounts": 0}
+    assert r["by_month"][-1] == {"month": "2026-10", "assets": 355290.0, "liabilities": -198000.0, "net_worth": 157290.0,
+                                 "carried_accounts": 1}
+    assert r["as_of"] == "2026-10" and r["net_worth"] == 157290.0 and r["cash_included"] is True
+    assert r["change"] == {"net_worth": 7290.0, "net_worth_pct": 4.9, "assets": 5290.0, "liabilities": 2000.0}
+    by_alias = {a["account"]: a for a in r["accounts"]}
+    assert by_alias["Asset A"]["value"] == 52000.0 and by_alias["Asset A"]["carried"] is True
+    assert by_alias["Asset A"]["change"] == 2000.0 and by_alias["Asset A"]["data_to"] == "2026-10"
+    assert by_alias["Asset C"]["ignored"] is True and by_alias["Liability A"]["change"] == 2000.0
+    assert by_alias["Account A"] == {"account": "Account A", "type": "cash", "value": 3290.0, "change": None,
+                                     "carried": False, "ignored": False, "data_from": "2026-10", "data_to": "2026-10"}
+    assert sources == [{"label": "Dashboard: Net worth", "nav": {"section": "dashboard", "tab": "overview"}}]
+    # A window of the last two months, and one account's own history.
+    r2 = json.loads(ask_data.run("net_worth", {"months": 2, "account": ""}, fixture())[0])
+    assert r2["window"] == {"from": "2026-08", "to": "2026-10", "months": 2} and r2["change"]["net_worth"] == 157290.0 - 153000.0
+    out, sources = ask_data.run("net_worth", {"months": 0, "account": "liability a"}, fixture())
+    r3 = json.loads(out)
+    assert r3["account"] == "Liability A" and r3["type"] == "liability" and r3["value"] == -198000.0
+    assert [m["value"] for m in r3["by_month"]] == [-200000.0, -199000.0, -198000.0]
+    assert sources == [{"label": "Dashboard: Example Mortgage", "nav": {"section": "dashboard", "tab": "liabilities"}}]
+    try:
+        ask_data.run("net_worth", {"months": 0, "account": "Asset Z"}, fixture())
+        assert False, "unknown alias"
+    except ask_data.LookupError_ as exc:
+        assert "Asset A" in str(exc) and "Account A" in str(exc)
+    empty = fixture()
+    empty.balance_accounts, empty.balance_periods, empty.balance_matrix, empty.cash, empty.cash_txns = [], [], {}, [], []
+    try:
+        ask_data.run("net_worth", {"months": 0, "account": ""}, empty)
+        assert False, "no balance sheet"
+    except ask_data.LookupError_ as exc:
+        assert "no account balances" in str(exc)
+
+
+def test_index_net_worth_block_is_the_lookups_latest_month():
+    _, fake, _ = run([msg(text("ok"))], page={"section": "dashboard", "tab": "assets"})
+    index = json.loads(fake.calls[0]["system"][1]["text"].split("\n", 1)[1])
+    assert index["page"] == {"section": "dashboard", "tab": "assets"}
+    nw = index["net_worth"]
+    assert nw["as_of"] == "2026-10" and nw["net_worth"] == 157290.0 and nw["change_last_month"] == 157290.0 - 153000.0
+    assert nw["data_from"] == "2026-07" and nw["balance_accounts"] == 4 and nw["lookup"] == "net_worth"
+    empty = fixture()
+    empty.balance_accounts, empty.balance_periods, empty.balance_matrix, empty.cash, empty.cash_txns = [], [], {}, [], []
+    assert ask_data.net_worth_index(empty) == {"balance_accounts": 0, "cash_accounts_included": 0, "lookup": "net_worth"}
+    assert ask_data.page_context(empty, {"section": "dashboard", "tab": "evil"})["tab"] == "overview"
+
+
 def test_bad_lookup_input_is_an_error_result_not_a_crash():
     events, fake, _ = run([
         msg(tool("spending_breakdown", {"group_by": "merchant", "months": 6, "category": "", "merchant": "", "card": "Card Z"})),
@@ -245,14 +311,18 @@ def test_nothing_identifying_is_sent():
         msg(tool("find_card_transactions", {"merchant": "kroger", "category": "", "card": "", "start": "", "end": "",
                                             "min_amount": 0, "max_amount": 0, "limit": 25}),
             tool("find_cash_transactions", {"account": "", "payee": "", "start": "", "end": "", "limit": 25}),
-            tool("cash_summary", {"account": "Account A", "months": 6})),
+            tool("cash_summary", {"account": "Account A", "months": 6}),
+            tool("net_worth", {"months": 0, "account": ""})),
         msg(text("Done.")),
     ], page={"section": "cashflow", "account_id": 7})
     sent = json.dumps(fake.calls)
-    for secret in ("Travel Rewards Card", "Everyday Cash Back", "Joint Checking", "JANE", "Jane Doe", "#4471", "OAK GROVE"):
+    for secret in ("Travel Rewards Card", "Everyday Cash Back", "Joint Checking", "JANE", "Jane Doe", "#4471", "OAK GROVE",
+                   "Brokerage", "Example Bank", "Example Home", "Example Mortgage", "Old Savings"):
         assert secret not in sent, secret
-    assert "Card A" in sent and "Account A" in sent and ask_data.WITHHELD in sent
-    assert final(events)["sources"][-1]["label"] == "Cash Flow: Joint Checking"   # the user sees real names
+    assert "Card A" in sent and "Account A" in sent and "Asset A" in sent and "Liability A" in sent
+    assert ask_data.WITHHELD in sent
+    labels = [s["label"] for s in final(events)["sources"]]
+    assert "Cash Flow: Joint Checking" in labels and labels[-1] == "Dashboard: Net worth"   # the user sees real names
 
 
 def test_person_to_person_payees_keep_only_the_service():
@@ -291,6 +361,63 @@ def test_real_names_in_history_go_back_to_aliases():
     sent = json.dumps(fake.calls[0]["messages"])
     assert "Travel Rewards Card" not in sent and "Joint Checking" not in sent and "everyday cash" not in sent.lower()
     assert "Mostly on Card A; Account A paid it." in sent and "And on my Card B?" in sent
+
+
+def test_balance_sheet_names_alias_both_ways():
+    data = fixture()
+    assert ask_data.realias("Is the Example Mortgage shrinking? And Brokerage at Example Bank?", data) == \
+        "Is the Liability A shrinking? And Asset A?"
+    m = data.alias_map()
+    assert ask_data.unalias("Asset A grew; Assets A and B together; Liability A fell.", m) == \
+        "Brokerage at Example Bank grew; Brokerage at Example Bank and Example Home together; Example Mortgage fell."
+    events, _, _ = run([msg(text("Liability A is down to $198,000."))])
+    assert final(events)["text"] == "Example Mortgage is down to $198,000." and final(events)["unverified"] == []
+
+
+# ── Areas switched off under Settings → AI ───────────────────────────────────
+
+def test_areas_off_remove_their_lookups_index_blocks_and_proposals():
+    areas = {"cards": True, "cash": False, "balances": False}
+    events, fake, _ = run([
+        msg(tool("cash_summary", {"account": "", "months": 3}),
+            tool("net_worth", {"months": 0, "account": ""}),
+            tool("subscriptions", {"include_habitual": False})),
+        msg(text("Netflix is $22.99.")),
+    ], areas=areas)
+    c = fake.calls[0]
+    names = {t["name"] for t in c["tools"]}
+    assert not names & {"cash_summary", "cash_flow", "find_cash_transactions", "net_worth", "propose_payee_role"}
+    assert {"spending_breakdown", "propose_merchant_category", "propose_import_profile"} <= names
+    index = json.loads(c["system"][1]["text"].split("\n", 1)[1])
+    assert "cash_accounts" not in index and "net_worth" not in index and index["off"] == ["cash", "balances"]
+    assert index["trim_items"] and index["cards"]
+    prompt = c["system"][0]["text"]
+    assert "Access" in prompt and "cash accounts, balance sheet" in prompt and ask.NEEDS_ACCESS in prompt
+    # A lookup of an area that is off is refused even when called; the rest run.
+    results = fake.calls[1]["messages"][-1]["content"]
+    assert results[0]["is_error"] and "cash accounts area is switched off" in results[0]["content"]
+    assert results[1]["is_error"] and "balance sheet area" in results[1]["content"]
+    assert not results[2].get("is_error") and final(events)["type"] == "final"
+    # Nothing of the cash register or balance sheet reached the model (the prompt's wording aside).
+    assert "Account A" not in c["system"][1]["text"] and "Asset A" not in json.dumps(results)
+    assert "3290" not in json.dumps(fake.calls) and "157290" not in json.dumps(fake.calls)
+    # Every area on: the plain prompt, every tool, no "off" list.
+    _, fake2, _ = run([msg(text("ok"))])
+    assert "Access" not in fake2.calls[0]["system"][0]["text"] and ask.rules() == ask.RULES
+    assert len(fake2.calls[0]["tools"]) == len(ask_data.TOOLS) + len(__import__("ask_proposals").TOOLS)
+    assert "off" not in json.loads(fake2.calls[0]["system"][1]["text"].split("\n", 1)[1])
+
+
+def test_question_needing_an_off_area_is_declined_with_the_area():
+    events, _, _ = run([msg(text("NEEDS_ACCESS: balances."))], areas={"cards": True, "cash": True, "balances": False})
+    f = final(events)
+    assert f["type"] == "declined" and f["kind"] == "access" and f["area"] == "balances"
+    assert "balance sheet" in f["message"] and "Settings → AI" in f["message"]
+    assert ask.declined_message({"cards": True, "cash": False, "balances": False}) == \
+        "The Assistant only helps with your card spending and how Flow organizes them."
+    assert ask.declined_message() == ask.DECLINED_MESSAGE
+    events, _, _ = run([msg(text("NEEDS_ACCESS cards"))])      # nothing is off: the words are just an answer
+    assert final(events)["type"] == "declined" and final(events)["area"] == "cards"
 
 
 # ── Budget ───────────────────────────────────────────────────────────────────
@@ -540,9 +667,14 @@ def test_new_subcategory_names_are_checked():
 
 # ── Router: pause, daily count, refunds, logging ─────────────────────────────
 
-def _router(monkey_problem=None, rounds=(), relevant=True, used=None):
+def _router(monkey_problem=None, rounds=(), relevant=True, used=None, areas=None):
     import routers.ask as R
-    state = {"count": 0 if used is None else used}
+    state = {"count": 0 if used is None else used, "loaded_areas": None}
+    areas = areas or {"cards": True, "cash": True, "balances": True}
+
+    def load(db, areas_=None):
+        state["loaded_areas"] = areas_
+        return fixture()
     c = client(list(rounds), relevant)
     logs = []
     saved = {}
@@ -559,7 +691,8 @@ def _router(monkey_problem=None, rounds=(), relevant=True, used=None):
     patch(R.card_ai, "client_factory", lambda: c)
     patch(R, "_bump", bump)
     patch(R, "meter", lambda db: {"month": "2026-10", "this_month": state["count"], "last_month": 0})
-    patch(R.ask_data, "load", lambda db: fixture())
+    patch(R.card_ai, "areas_enabled", lambda: dict(areas))
+    patch(R.ask_data, "load", load)
     patch(R, "make_logger", lambda db: (lambda *a: logs.append(a)))
     return R, state, c, logs, lambda: [setattr(o, n, v) for (o, n), v in saved.items()]
 
@@ -574,6 +707,22 @@ def test_paused_key_answers_with_reason_and_does_not_count():
         ev = _events(R, [{"role": "user", "text": "Where can I trim?"}])
         assert ev[0]["type"] == "error" and ev[0]["paused"] and state["count"] == 0
         assert c.beta.messages.calls == [] and c.beta.messages.parse_calls == []
+    finally:
+        undo()
+
+
+def test_router_passes_the_areas_to_load_the_status_and_the_answer():
+    areas = {"cards": False, "cash": True, "balances": True}
+    R, state, c, logs, undo = _router(rounds=[msg(text("NEEDS_ACCESS cards"))], areas=areas)
+    try:
+        assert R.ask_status(db=None)["areas"] == areas
+        ev = _events(R, [{"role": "user", "text": "What did I spend on my cards?"}])
+        assert state["loaded_areas"] == areas                               # an area that is off is never read
+        assert ev[-1] == {"type": "declined", "kind": "access", "area": "cards", "message": ask.access_message("cards"),
+                          "usage": {"input_tokens": 1000, "output_tokens": 200},
+                          "meter": {"month": "2026-10", "this_month": 1, "last_month": 0}}
+        assert "spending_breakdown" not in {t["name"] for t in c.beta.messages.calls[0]["tools"]}
+        assert logs[1][4]["areas"] == areas
     finally:
         undo()
 

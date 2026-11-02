@@ -199,14 +199,14 @@ async def check_import(account_id: int, file: UploadFile = File(...), profile_id
         raise HTTPException(status_code=404, detail="Card not found")
     parsed, _, c, errors = await _read_and_parse(db, acct, file, profile_id)
     plan = card_import.plan_import(db, acct, parsed)
-    problem = card_ai.key_problem(db) if card_ai.enabled() else None
+    problem = card_ai.key_problem(db) if card_ai.area_enabled("cards") else None
     other = card_import.other_card_match(db, acct, parsed)
     known = {n.strip().upper() for n in (acct.cardholder_names or "").splitlines() if n.strip()}
     return {
         **_parse_summary(parsed, c), "errors": errors[:20], "error_count": len(errors),
         "would_import": len(plan.to_import), "would_skip": plan.skipped_duplicates,
-        "would_send_to_ai": plan.needs_ai if card_ai.enabled() and not problem else 0,
-        "ai_enabled": card_ai.enabled(),
+        "would_send_to_ai": plan.needs_ai if card_ai.area_enabled("cards") and not problem else 0,
+        "ai_enabled": card_ai.area_enabled("cards"),
         "ai_problem": problem,
         "preview": plan.preview,
         "other_card_match": {**other, "message": card_import.other_card_message(other, acct.name)} if other else None,
@@ -264,14 +264,14 @@ async def import_statement(account_id: int, background: BackgroundTasks, file: U
     db.commit()
 
     # A key the API already rejected is not retried automatically (see card_ai.key_problem).
-    problem = card_ai.key_problem(db) if card_ai.enabled() else None
-    queued = plan.needs_ai if card_ai.enabled() and not problem else 0
+    problem = card_ai.key_problem(db) if card_ai.area_enabled("cards") else None
+    queued = plan.needs_ai if card_ai.area_enabled("cards") and not problem else 0
     if queued:
         background.add_task(card_ai.run_categorization, SessionLocal)
     return {
         **_parse_summary(parsed, c), "import_id": imp.id,
         "imported": len(plan.to_import), "skipped": plan.skipped_duplicates, "new_card_numbers": new_numbers,
-        "ai": {"enabled": card_ai.enabled(), "queued_merchants": queued, "reason": card_ai.disabled_reason(),
+        "ai": {"enabled": card_ai.area_enabled("cards"), "queued_merchants": queued, "reason": card_ai.area_off_reason("cards"),
                "problem": problem},
     }
 
@@ -1178,18 +1178,18 @@ def merchant_page(name: str, accounts: str | None = None, date_from: DateType | 
 @router.get("/ai/status")
 def ai_status(db: Session = Depends(get_db)):
     return {
-        "enabled": card_ai.enabled(), "reason": card_ai.disabled_reason(), "model": card_ai.model_name(),
+        "enabled": card_ai.area_enabled("cards"), "reason": card_ai.area_off_reason("cards"), "model": card_ai.model_name(),
         "categorize_model": card_ai.model_name(card_ai.TASK_CATEGORIZE),
-        "pending_merchants": len(card_ai.pending_merchants(db)) if card_ai.enabled() else
+        "pending_merchants": len(card_ai.pending_merchants(db)) if card_ai.area_enabled("cards") else
         len(card_ai.pending_merchants(db, include_stale=False)),
-        "problem": card_ai.key_problem(db) if card_ai.enabled() else None,
+        "problem": card_ai.key_problem(db) if card_ai.area_enabled("cards") else None,
         **card_ai.status(),
     }
 
 
 @router.post("/categorize")
 def categorize(background: BackgroundTasks, db: Session = Depends(get_db)):
-    reason = card_ai.disabled_reason()
+    reason = card_ai.area_off_reason("cards")
     if reason:
         raise HTTPException(status_code=409, detail=reason)
     pending = len(card_ai.pending_merchants(db))

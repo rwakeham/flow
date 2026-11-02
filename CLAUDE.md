@@ -250,7 +250,10 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   timeseries, `carried_accounts` in the summary); archived accounts don't carry. Manage Accounts shows each account's
   newest balance (`/api/accounts` `latest`) and flags one with nothing for the user's month (`behind`,
   `balance_sheet.behind`, by `X-Flow-Today`); a cash account is behind when its newest bank row (else any row) is
-  over `routers/register.REGISTER_BEHIND_DAYS` (40) old. The panel header counts them while collapsed. The AI fallback is opt-in per
+  over `routers/register.REGISTER_BEHIND_DAYS` (40) old. `/api/register/accounts` `current_balance` is the running
+  balance (manual rows plus unmatched bank rows, `_compute_running_balance`'s rule), the same figure as the
+  register's balance column, the net worth chart's cash series (`/accounts/timeseries`) and the Assistant's
+  `net_worth` lookup, so the Net Worth card agrees with all three. The panel header counts them while collapsed. The AI fallback is opt-in per
   paste: `balance_sheet.outline` replaces amounts and account numbers with tokens and every word outside `VOCAB`
   with `~`; the model returns token pairs (`items_from_ai`), local readings stand (`merge_items`). Logged as
   `ai_request_log` purpose `balances`. Text pasted into the Assistant that looks like a summary opens this dialog
@@ -506,12 +509,16 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   charges or was proposed with `propose_new_detail`, merchant exists, no overlapping amount rule) and
   return a card with the exact request for Flow's normal endpoint; the browser sends it when
   the user presses Apply, and that endpoint validates again. Code owns the facts: Claude gets an index (coverage,
-  category totals by month, category-list counts, the top of the trim list, the page on screen) and
-  seven strict lookups (including `categories`: the list with built-in/yours flags, original names of
-  renamed built-ins and charge counts; `spending_breakdown` groups by detail too) that
-  return summaries; only `find_card_transactions` / `find_cash_transactions` return single rows (25 at
-  most). Cards are "Card A", cash accounts "Account A" (`realias` converts real names in returned
-  history; `unalias` restores them in the answer); names pass `is_safe_label`, transfers to people keep
+  category totals by month, category-list counts, the top of the trim list, the latest month's net worth
+  (`net_worth_index`), the page on screen) and nine strict lookups (including `categories`: the list with
+  built-in/yours flags, original names of renamed built-ins and charge counts; `spending_breakdown` groups by
+  detail too; `net_worth`: the balance sheet by month as the Dashboard chart draws it, `net_worth_series` lining
+  the balance periods up with the cash register's month-end balances from the rows already loaded and counting
+  cash as assets, ignored accounts listed but left out, with each account's value and change, or one account's
+  history) that return summaries; only `find_card_transactions` / `find_cash_transactions` return single rows
+  (25 at most). Cards are "Card A", cash accounts "Account A", balance-sheet accounts "Asset A" / "Liability A"
+  (`load_balances` over `routers/data.balance_matrix`; institutions are never loaded; `realias` converts real
+  names in returned history; `unalias` restores them in the answer); names pass `is_safe_label`, transfers to people keep
   only the service ("Zelle transfer"). Advice comes from `ask_data.trim_items`, which code ranks (easy
   first, then monthly cost). One question: a low-effort topic gate (`{"relevant": bool}`; a failure
   counts as relevant and the `OFF_TOPIC` reply is the backstop), then up to 5 streamed rounds (4
@@ -554,6 +561,27 @@ CI (`.github/workflows/ci.yml`) runs the same on every pull request and push to 
   again. One in-memory copy (`settings_store.load` at startup and after a backup restore), one worker.
   The AI dialog (`static/ai.js`, `routers/ai.py`) has the key (save, test, remove), the switch, the three
   models (datalist of known names, validated like `setup.sh` did) and the redact words.
+- **What the AI may see: one switch per data area** (`settings_store.AI_AREAS`: `ai_cards`, `ai_cash`,
+  `ai_balances` → `FLOW_AI_CARDS` / `FLOW_AI_CASH` / `FLOW_AI_BALANCES`, default on, env-lockable like the rest,
+  under the global switch in Settings → AI, `static/ai.js` "What the AI may see"). `card_ai.AREAS` / `AREA_LABELS`,
+  `area_enabled(area)` (= `enabled()` and the area's flag) and `area_off_reason(area)` (the global reason first,
+  then the area's) are the only gates: cards = `categorize_pending`, `generate_insights`, the import preview
+  and queue, `/api/cards/categorize` and `/api/cards/ai/status` (so the Cards banner reads "AI for card spending
+  is switched off"); balances = `/api/balances/read-ai` and the `ai` block of `/api/balances/settings`; cash has
+  no feature outside the Assistant. **Any new AI feature gates on its area, not on `enabled()`.** The Assistant:
+  `routers/ask._run` passes `card_ai.areas_enabled()` to `ask_data.load(db, areas)`, which does not read an area
+  that is off (so nothing of it can reach the index or a lookup), to `build_index` (the area's blocks left out,
+  `"off": [...]` listed) and to `ask.answer`, which offers only `ask_data.tools_for` + `ask_proposals.tools_for`
+  (`TOOL_AREA` in each module; `propose_import_profile` has no area) and answers a call to a tool not offered
+  with an error result. `ask.rules(areas)` appends the Access paragraph: a question needing an off area is
+  answered with exactly `NEEDS_ACCESS <area>`, which `answer` turns into `{"type": "declined", "kind": "access",
+  "area", "message"}` (counted like an off-topic reply); `declined_message(areas)` names only the areas on.
+  `GET /api/ask/status` carries `areas`, and `POST /api/ask` is 409 when all three are off. The panel
+  (`static/ask.js` `askRenderBanner`, `#ask-banner`): the Assistant button stays visible with AI off; the banner
+  says "AI is off: <reason>", "every area is switched off" or "Not available to the Assistant: …" with an
+  "Open Settings → AI" button (`askNavigate({action:'settings', section:'ai'})`), the input is disabled while
+  nothing can be asked (`askCanAsk`), suggestions follow the areas, and an access `declined` item carries the
+  same button. `aiRefreshCards` refreshes the panel after any change in Settings → AI.
 - **Update check** (`update_check.py`, `routers/updates.py`, Settings → Updates in `index.html` / `static/settings.js`): a background
   task started by the lifespan (`update_check.loop`; two minutes after startup, so the deploy's health check
   comes first, then daily) does one GET to GitHub's latest-release endpoint for `update_check.REPO`, server-side
@@ -626,6 +654,9 @@ the proxy settings). For host state:
 | `FLOW_AI_MODEL_CATEGORIZE` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for merchant categorization only (`card_ai.model_name(TASK_CATEGORIZE)`; `ai_model_categorize`) |
 | `FLOW_AI_MODEL_ASK` | *(empty: the AI dialog's value, else `FLOW_AI_MODEL`)* | Model for the Assistant's topic gate and answer rounds (`TASK_ASK`; `ai_model_ask`) |
 | `FLOW_AI_ENABLED` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn AI calls off even with a key set (the AI dialog's switch, `ai_enabled`) |
+| `FLOW_AI_CARDS` | `1` (enabled) | `0` keeps card spending from the AI: no categorization, Insights, or Assistant card lookups and proposals (`ai_cards`) |
+| `FLOW_AI_CASH` | `1` (enabled) | `0` keeps the cash register from the AI: no Assistant cash, cash-flow or payee lookups and proposals (`ai_cash`) |
+| `FLOW_AI_BALANCES` | `1` (enabled) | `0` keeps the balance sheet from the AI: no AI reading of pasted balances, no Assistant net worth lookup (`ai_balances`) |
 | `FLOW_AI_REDACT` | *(empty)* | Comma-separated extra words stripped from merchant names before any AI call (the AI dialog's field, `ai_redact`) |
 | `FLOW_UPDATE_CHECK` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily check for a newer release off (Settings → Updates has the same switch, `update_check`) |
 | `FLOW_BACKUP_DAILY` | `1` (enabled) | Set to `0`/`false`/`no`/`off` to turn the daily backup off (Settings → Backups, `backup_daily`) |
@@ -636,8 +667,8 @@ the proxy settings). For host state:
 `SECRET_KEY` blank, so a copied file can't deploy as is; `APP_PORT`), plus the optional ones commented out.
 `setup.sh` writes the four (the password is required before the first start; once a database volume
 exists it is optional, offered as a reset, since Flow keeps the password itself), then offers the
-Anthropic API key (read hidden; `off` removes the line). The models, switch and redact words are the AI
-dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
+Anthropic API key (read hidden; `off` removes the line). The models, switches (global and per area) and
+redact words are the AI dialog's; `setup.sh` no longer asks for them. In `docker-compose.yml` every Flow-kept setting is passed as
 `${VAR:-}` with a blank default: a non-blank default would reach the app as a set variable and lock the
 setting in the dialog (409). On a re-run with a database volume, `setup.sh` offers to
 remove any of `FLOW_PASSWORD`, `ANTHROPIC_API_KEY`, `FLOW_AI_*`, `FLOW_UPDATE_CHECK` and `FLOW_BACKUP_*` still in `.env` that this run didn't

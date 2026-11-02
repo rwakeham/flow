@@ -50,7 +50,7 @@ def settings_payload() -> dict:
 @router.get("/status")
 def ai_status(db: Session = Depends(get_db)):
     return {
-        "enabled": card_ai.enabled(), "reason": card_ai.disabled_reason(),
+        "enabled": card_ai.enabled(), "reason": card_ai.disabled_reason(), "areas": card_ai.areas_enabled(),
         "problem": card_ai.key_problem(db) if card_ai.enabled() else None,
         "default_model": card_ai.DEFAULT_MODEL, "models": card_ai.models_in_use(),
         "settings": settings_payload(),
@@ -62,6 +62,9 @@ class SettingsBody(BaseModel):
     ai_model_categorize: str | None = Field(default=None, max_length=80)
     ai_model_ask: str | None = Field(default=None, max_length=80)
     ai_enabled: bool | None = None
+    ai_cards: bool | None = None
+    ai_cash: bool | None = None
+    ai_balances: bool | None = None
     ai_redact: str | None = Field(default=None, max_length=500)
 
 
@@ -77,8 +80,10 @@ def checked_settings(body: SettingsBody) -> dict[str, str]:
             raise HTTPException(status_code=422, detail=f"A model name is letters, digits, dots and dashes "
                                                         f"(e.g. {card_ai.DEFAULT_MODEL}), not {value!r}.")
         changes[key] = value
-    if body.ai_enabled is not None:
-        changes[st.AI_ENABLED] = "1" if body.ai_enabled else "0"
+    for key in (st.AI_ENABLED, st.AI_CARDS, st.AI_CASH, st.AI_BALANCES):
+        value = getattr(body, key)
+        if value is not None:
+            changes[key] = "1" if value else "0"
     if body.ai_redact is not None:
         words = ", ".join(w.strip() for w in body.ai_redact.split(",") if w.strip())
         if not REDACT_RE.match(words):

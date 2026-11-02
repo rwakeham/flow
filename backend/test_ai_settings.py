@@ -33,6 +33,8 @@ def test_checked_settings_validates_and_leaves_absent_keys_alone():
     assert R.checked_settings(body) == {st.AI_MODEL: "claude-haiku-5-5", st.AI_ENABLED: "0", st.AI_REDACT: "Smith, Acme"}
     assert R.checked_settings(R.SettingsBody(ai_model="")) == {st.AI_MODEL: ""}          # blank: back to the default
     assert R.checked_settings(R.SettingsBody()) == {}
+    assert R.checked_settings(R.SettingsBody(ai_cards=True, ai_cash=False, ai_balances=False)) == \
+        {st.AI_CARDS: "1", st.AI_CASH: "0", st.AI_BALANCES: "0"}
     with pytest.raises(HTTPException) as e:
         R.checked_settings(R.SettingsBody(ai_model_ask="claude sonnet"))
     assert e.value.status_code == 422
@@ -45,6 +47,7 @@ def test_settings_payload_says_where_each_value_comes_from(monkeypatch):
     p = R.settings_payload()
     assert p["ai_model_ask"] == {"value": "claude-haiku-5-5", "source": "flow", "env_var": "FLOW_AI_MODEL_ASK"}
     assert p["ai_model"]["source"] is None and p["api_key"]["last4"] == "1234" and p["api_key"]["source"] == "flow"
+    assert p["ai_cash"] == {"value": "", "source": None, "env_var": "FLOW_AI_CASH"}
     assert "sk-ant" not in str(p)                                                      # never the key itself
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-key-5678")
     assert R.settings_payload()["api_key"] == {"set": True, "last4": "5678", "source": "env",
@@ -89,6 +92,10 @@ def test_env_locked_values_are_refused_with_409(monkeypatch):
     with pytest.raises(HTTPException) as e:
         R.put_settings(R.SettingsBody(ai_model="claude-haiku-5-5"), db=FakeDB())
     assert e.value.status_code == 409 and "FLOW_AI_MODEL" in e.value.detail
+    monkeypatch.setenv("FLOW_AI_CASH", "0")
+    with pytest.raises(HTTPException) as e:
+        R.put_settings(R.SettingsBody(ai_cash=True), db=FakeDB())
+    assert e.value.status_code == 409 and "FLOW_AI_CASH" in e.value.detail
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
     with pytest.raises(HTTPException) as e:
         R.put_key(R.KeyBody(key="sk-ant-new-key"), db=FakeDB())

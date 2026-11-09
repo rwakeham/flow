@@ -2,7 +2,7 @@ services:
   db:
     # Pinned to the multi-platform index digest. Keep backups-owner's image the same. Never move
     # to another major version here: a 17 server can't open a 16 data directory.
-    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
     restart: unless-stopped
     environment:
       POSTGRES_DB: flow
@@ -19,7 +19,7 @@ services:
   # One-off: hands the backup volume to the app's unprivileged user (uid 10001).
   # Volumes created by earlier versions, whose app ran as root, are root-owned.
   backups-owner:
-    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
     user: root
     entrypoint: ["chown", "-R", "10001:10001", "/backups"]
     restart: "no"

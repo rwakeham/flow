@@ -1,7 +1,7 @@
 # Pinned to the multi-platform index digest (amd64, arm64, arm/v7 ...), so what was built,
 # tested and scanned is what deploys. Dependabot (.github/dependabot.yml) proposes new digests;
 # Python stays on 3.12.
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 # psycopg2-binary and the other dependencies ship as wheels: no compiler or
 # libpq headers are needed, and the deploy's health check runs from the host.
